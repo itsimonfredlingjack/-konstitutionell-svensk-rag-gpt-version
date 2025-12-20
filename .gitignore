@@ -27,3 +27,7 @@ node_modules
 .next/dev/cache/turbopack/ea1df5f2/00000246.meta
 .next/dev/cache/turbopack/ea1df5f2/CURRENT
 .next/dev/cache/turbopack/ea1df5f2/LOG
+
+.next/
+node_modules/
+*.log
