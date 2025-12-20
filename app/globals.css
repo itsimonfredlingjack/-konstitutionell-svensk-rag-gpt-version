@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@theme {
+    --color-glass-border: rgba(255, 255, 255, 0.1);
+    --color-glass-surface: rgba(255, 255, 255, 0.03);
+    --color-glass-highlight: rgba(255, 255, 255, 0.08);
+
+    --backdrop-blur-xs: 2px;
+    --backdrop-blur-xl: 40px;
+
+    --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    --shadow-glass-inset: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+
+    --font-sans: var(--font-inter), sans-serif;
+    --font-mono: var(--font-roboto-mono), monospace;
+}
+
+:root {
+    /* Pro Typography & Layout Variables */
+    --chatW: clamp(1100px, 85vw, 1800px);
+    --measure: 72ch;
+
+    --foreground-rgb: 255, 255, 255;
+    --background-start-rgb: 15, 15, 30;
+    --background-end-rgb: 5, 5, 10;
+}
+
+body {
+    color: rgb(var(--foreground-rgb));
+    /* background: linear-gradient(to bottom,
+            transparent,
+            rgb(var(--background-end-rgb))) rgb(var(--background-start-rgb)); */
+    background: transparent;
+    min-height: 100vh;
+    overflow: hidden;
+    font-family: var(--font-inter), sans-serif;
+    letter-spacing: -0.015em;
+    font-feature-settings: "rlig" 1, "calt" 1, "cv05" 1, "cv11" 1;
+}
+
+@layer utilities {
+    .text-balance {
+        text-wrap: balance;
+    }
+}
+
+/* Custom global animations/util classes */
+.glass-panel {
+    @apply bg-glass-surface shadow-glass relative;
+    backdrop-filter: blur(60px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}

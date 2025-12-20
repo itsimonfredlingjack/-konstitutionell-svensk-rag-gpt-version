@@ -1,0 +1,276 @@
+
+> constitutional-gpt@1.0.0 dev
+> next dev
+
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of /home/dev/package-lock.json as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * /home/dev/ANTI-PROJECTS/constitutional-gpt/package-lock.json
+
+▲ Next.js 16.1.0 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.86.27:3000
+
+✓ Starting...
+✓ Ready in 1031ms
+○ Compiling / ...
+ GET / 200 in 3.8s (compile: 3.7s, render: 113ms)
+✓ Compiled in 153ms
+✓ Compiled in 159ms
+✓ Compiled in 115ms
+✓ Compiled in 75ms
+ GET / 200 in 356ms (compile: 175ms, render: 180ms)
+ GET / 200 in 129ms (compile: 52ms, render: 77ms)
+ GET / 200 in 167ms (compile: 59ms, render: 108ms)
+ GET / 200 in 215ms (compile: 54ms, render: 161ms)
+ GET / 200 in 155ms (compile: 54ms, render: 101ms)
+✓ Compiled in 85ms
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+✓ Compiled in 154ms
+ GET / 200 in 480ms (compile: 61ms, render: 418ms)
+✓ Compiled in 180ms
+✓ Compiled in 67ms
+⨯ ./ANTI-PROJECTS/constitutional-gpt/app/page.tsx:8:10
+Ecmascript file had an error
+[0m [90m  6 |[39m [36mimport[39m { [33mSystemMonitor[39m } [36mfrom[39m [32m"@/components/SystemMonitor"[39m[33m;[39m
+ [90m  7 |[39m [36mimport[39m { [33mSend[39m[33m,[39m [33mUser[39m } [36mfrom[39m [32m"lucide-react"[39m[33m;[39m
+[31m[1m>[22m[39m[90m  8 |[39m [36mimport[39m { useState } [36mfrom[39m [32m"react"[39m[33m;[39m
+ [90m    |[39m          [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+ [90m  9 |[39m [36mimport[39m clsx [36mfrom[39m [32m"clsx"[39m[33m;[39m
+ [90m 10 |[39m
+ [90m 11 |[39m [36mexport[39m [36mdefault[39m [36mfunction[39m [33mHome[39m() {[0m
+
+You're importing a component that needs `useState`. This React Hook only works in a Client Component. To fix, mark the file (or its parent) with the `"use client"` directive.
+
+ Learn more: https://nextjs.org/docs/app/api-reference/directives/use-client
+
+
+
+
+ GET / 500 in 1503ms (compile: 1249ms, render: 254ms)
+✓ Compiled in 159ms
+ GET / 200 in 628ms (compile: 204ms, render: 424ms)
+✓ Compiled in 85ms
+✓ Compiled in 58ms
+✓ Compiled in 64ms
+✓ Compiled in 43ms
+ GET / 200 in 481ms (compile: 189ms, render: 292ms)
+ GET / 200 in 231ms (compile: 10ms, render: 220ms)
+✓ Compiled in 117ms
+✓ Compiled in 76ms
+ GET / 200 in 140ms (compile: 59ms, render: 81ms)
+✓ Compiled in 242ms
+✓ Compiled in 65ms
+✓ Compiled in 32ms
+✓ Compiled in 215ms
+ GET / 200 in 171ms (compile: 56ms, render: 115ms)
+✓ Compiled in 182ms
+✓ Compiled in 93ms
+✓ Compiled in 51ms
+ GET / 200 in 128ms (compile: 49ms, render: 79ms)
+⨯ ReferenceError: ShieldCheck is not defined
+    at ConstitutionalLens (components/ConstitutionalLens.tsx:21:26)
+  19 |                 <div className="flex items-center gap-3">
+  20 |                     <div className="p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+> 21 |                         <ShieldCheck className="w-5 h-5 text-cyan-400" />
+     |                          ^
+  22 |                     </div>
+  23 |                     <div>
+  24 |                         <h2 className="text-sm font-semibold text-white tracking-wide">CONSTITUTIONAL LAYER</h2> {
+  digest: '4026973429'
+}
+ GET / 500 in 419ms (compile: 10ms, render: 409ms)
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+✓ Compiled in 149ms
+ GET / 200 in 522ms (compile: 72ms, render: 449ms)
+ GET / 200 in 336ms (compile: 16ms, render: 320ms)
+Error: Cannot apply unknown utility class `shadow-[0_8px_32px_rgba(30,`
+    [2m[at onInvalidCandidate (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/tailwindcss/dist/lib.js:21:1511)][0m
+    [2m[at Te (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/tailwindcss/dist/lib.js:16:36326)][0m
+    [2m[at /home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/tailwindcss/dist/lib.js:21:355][0m
+    [2m[at Rr (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/tailwindcss/dist/lib.js:3:1718)][0m
+    [2m[at _ (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/tailwindcss/dist/lib.js:3:1377)][0m
+    [2m[at $e (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/tailwindcss/dist/lib.js:21:172)][0m
+    [2m[at un (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/tailwindcss/dist/lib.js:38:294)][0m
+    [2m[at async cn (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/tailwindcss/dist/lib.js:38:631)][0m
+    [2m[at async Xr (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/@tailwindcss/node/dist/index.js:10:3417)][0m
+    [2m[at async I (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/@tailwindcss/postcss/dist/index.js:10:3977)][0m
+✓ Compiled in 113ms
+✓ Compiled in 24ms
+✓ Compiled in 25ms
+✓ Compiled in 8ms
+✓ Compiled in 23ms
+✓ Compiled in 50ms
+✓ Compiled in 44ms
+✓ Compiled in 158ms
+✓ Compiled in 26ms
+⨯ ./ANTI-PROJECTS/constitutional-gpt/app/globals.css
+Error evaluating Node.js code
+CssSyntaxError: tailwindcss: /home/dev/ANTI-PROJECTS/constitutional-gpt/app/globals.css:1:1: Cannot apply unknown utility class `shadow-[0_8px_32px_rgba(30,`
+    [at Input.error (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/input.js:135:16)]
+    [at Root.error (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/node.js:146:32)]
+    [at Object.Once (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/@tailwindcss/postcss/dist/index.js:10:6911)]
+    [at async LazyResult.runAsync (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/lazy-result.js:293:11)]
+    [at async transform (turbopack:///[turbopack-node]/transforms/postcss.ts:70:34)]
+    [at async run (turbopack:///[turbopack-node]/ipc/evaluate.ts:92:23)]
+
+Import trace:
+  Client Component Browser:
+    ./ANTI-PROJECTS/constitutional-gpt/app/globals.css [Client Component Browser]
+    ./ANTI-PROJECTS/constitutional-gpt/app/layout.tsx [Server Component]
+
+
+ GET / 500 in 167ms (compile: 58ms, render: 109ms)
+⨯ ./ANTI-PROJECTS/constitutional-gpt/app/globals.css
+Error evaluating Node.js code
+CssSyntaxError: tailwindcss: /home/dev/ANTI-PROJECTS/constitutional-gpt/app/globals.css:1:1: Cannot apply unknown utility class `shadow-[0_8px_32px_rgba(30,`
+    [at Input.error (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/input.js:135:16)]
+    [at Root.error (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/node.js:146:32)]
+    [at Object.Once (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/@tailwindcss/postcss/dist/index.js:10:6911)]
+    [at async LazyResult.runAsync (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/lazy-result.js:293:11)]
+    [at async transform (turbopack:///[turbopack-node]/transforms/postcss.ts:70:34)]
+    [at async run (turbopack:///[turbopack-node]/ipc/evaluate.ts:92:23)]
+
+Import trace:
+  Client Component Browser:
+    ./ANTI-PROJECTS/constitutional-gpt/app/globals.css [Client Component Browser]
+    ./ANTI-PROJECTS/constitutional-gpt/app/layout.tsx [Server Component]
+
+
+ GET / 500 in 90ms (compile: 25ms, render: 65ms)
+⨯ ./ANTI-PROJECTS/constitutional-gpt/app/globals.css
+Error evaluating Node.js code
+CssSyntaxError: tailwindcss: /home/dev/ANTI-PROJECTS/constitutional-gpt/app/globals.css:1:1: Cannot apply unknown utility class `shadow-[0_8px_32px_rgba(30,`
+    [at Input.error (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/input.js:135:16)]
+    [at Root.error (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/node.js:146:32)]
+    [at Object.Once (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/@tailwindcss/postcss/dist/index.js:10:6911)]
+    [at async LazyResult.runAsync (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/lazy-result.js:293:11)]
+    [at async transform (turbopack:///[turbopack-node]/transforms/postcss.ts:70:34)]
+    [at async run (turbopack:///[turbopack-node]/ipc/evaluate.ts:92:23)]
+
+Import trace:
+  Client Component Browser:
+    ./ANTI-PROJECTS/constitutional-gpt/app/globals.css [Client Component Browser]
+    ./ANTI-PROJECTS/constitutional-gpt/app/layout.tsx [Server Component]
+
+
+ GET / 500 in 32ms (compile: 10ms, render: 22ms)
+⨯ ./ANTI-PROJECTS/constitutional-gpt/app/globals.css
+Error evaluating Node.js code
+CssSyntaxError: tailwindcss: /home/dev/ANTI-PROJECTS/constitutional-gpt/app/globals.css:1:1: Cannot apply unknown utility class `shadow-[0_8px_32px_rgba(30,`
+    [at Input.error (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/input.js:135:16)]
+    [at Root.error (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/node.js:146:32)]
+    [at Object.Once (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/@tailwindcss/postcss/dist/index.js:10:6911)]
+    [at async LazyResult.runAsync (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/lazy-result.js:293:11)]
+    [at async transform (turbopack:///[turbopack-node]/transforms/postcss.ts:70:34)]
+    [at async run (turbopack:///[turbopack-node]/ipc/evaluate.ts:92:23)]
+
+Import trace:
+  Client Component Browser:
+    ./ANTI-PROJECTS/constitutional-gpt/app/globals.css [Client Component Browser]
+    ./ANTI-PROJECTS/constitutional-gpt/app/layout.tsx [Server Component]
+
+
+ GET / 500 in 41ms (compile: 22ms, render: 18ms)
+⨯ ./ANTI-PROJECTS/constitutional-gpt/app/globals.css
+Error evaluating Node.js code
+CssSyntaxError: tailwindcss: /home/dev/ANTI-PROJECTS/constitutional-gpt/app/globals.css:1:1: Cannot apply unknown utility class `shadow-[0_8px_32px_rgba(30,`
+    [at Input.error (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/input.js:135:16)]
+    [at Root.error (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/node.js:146:32)]
+    [at Object.Once (/home/dev/ANTI-PROJECTS/constitutional-gpt/node_modules/@tailwindcss/postcss/dist/index.js:10:6911)]
+    [at async LazyResult.runAsync (turbopack:///[project]/ANTI-PROJECTS/constitutional-gpt/node_modules/postcss/lib/lazy-result.js:293:11)]
+    [at async transform (turbopack:///[turbopack-node]/transforms/postcss.ts:70:34)]
+    [at async run (turbopack:///[turbopack-node]/ipc/evaluate.ts:92:23)]
+
+Import trace:
+  Client Component Browser:
+    ./ANTI-PROJECTS/constitutional-gpt/app/globals.css [Client Component Browser]
+    ./ANTI-PROJECTS/constitutional-gpt/app/layout.tsx [Server Component]
+
+
+ GET / 500 in 68ms (compile: 23ms, render: 45ms)
+ GET / 200 in 642ms (compile: 86ms, render: 556ms)
+✓ Compiled in 167ms
+✓ Compiled in 94ms
+✓ Compiled in 160ms
+ GET / 200 in 327ms (compile: 82ms, render: 245ms)
+✓ Compiled in 134ms
+ GET / 200 in 109ms (compile: 8ms, render: 101ms)
+✓ Compiled in 80ms
+✓ Compiled in 67ms
+✓ Compiled in 55ms
+✓ Compiled in 193ms
+✓ Compiled in 121ms
+✓ Compiled in 185ms
+⨯ ./ANTI-PROJECTS/constitutional-gpt/components/ConstitutionalLens.tsx:76:57
+Parsing ecmascript source code failed
+[0m [90m 74 |[39m                                     {isActive [33m&&[39m (
+ [90m 75 |[39m                                         [33m<[39m[33mspan[39m className[33m=[39m[32m"text-[9px] text-cyan-400 font-mono leading-none animate-pulse"[39m[33m>[39m
+[31m[1m>[22m[39m[90m 76 |[39m                                             {step[33m.[39mrole} [33m>>[39m
+ [90m    |[39m                                                         [31m[1m^[22m[39m
+ [90m 77 |[39m                                         [33m<[39m[33m/[39m[33mspan[39m[33m>[39m
+ [90m 78 |[39m                                     )}
+ [90m 79 |[39m                                 [33m<[39m[33m/[39m[33mdiv[39m[33m>[39m[0m
+
+Unexpected token. Did you mean `{'>'}` or `&gt;`?
+
+Import traces:
+  Client Component Browser:
+    ./ANTI-PROJECTS/constitutional-gpt/components/ConstitutionalLens.tsx [Client Component Browser]
+    ./ANTI-PROJECTS/constitutional-gpt/app/page.tsx [Client Component Browser]
+    ./ANTI-PROJECTS/constitutional-gpt/app/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./ANTI-PROJECTS/constitutional-gpt/components/ConstitutionalLens.tsx [Client Component SSR]
+    ./ANTI-PROJECTS/constitutional-gpt/app/page.tsx [Client Component SSR]
+    ./ANTI-PROJECTS/constitutional-gpt/app/page.tsx [Server Component]
+
+
+
+./ANTI-PROJECTS/constitutional-gpt/components/ConstitutionalLens.tsx:76:58
+Parsing ecmascript source code failed
+[0m [90m 74 |[39m                                     {isActive [33m&&[39m (
+ [90m 75 |[39m                                         [33m<[39m[33mspan[39m className[33m=[39m[32m"text-[9px] text-cyan-400 font-mono leading-none animate-pulse"[39m[33m>[39m
+[31m[1m>[22m[39m[90m 76 |[39m                                             {step[33m.[39mrole} [33m>>[39m
+ [90m    |[39m                                                          [31m[1m^[22m[39m
+ [90m 77 |[39m                                         [33m<[39m[33m/[39m[33mspan[39m[33m>[39m
+ [90m 78 |[39m                                     )}
+ [90m 79 |[39m                                 [33m<[39m[33m/[39m[33mdiv[39m[33m>[39m[0m
+
+Unexpected token. Did you mean `{'>'}` or `&gt;`?
+
+Import traces:
+  Client Component Browser:
+    ./ANTI-PROJECTS/constitutional-gpt/components/ConstitutionalLens.tsx [Client Component Browser]
+    ./ANTI-PROJECTS/constitutional-gpt/app/page.tsx [Client Component Browser]
+    ./ANTI-PROJECTS/constitutional-gpt/app/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./ANTI-PROJECTS/constitutional-gpt/components/ConstitutionalLens.tsx [Client Component SSR]
+    ./ANTI-PROJECTS/constitutional-gpt/app/page.tsx [Client Component SSR]
+    ./ANTI-PROJECTS/constitutional-gpt/app/page.tsx [Server Component]
+
+
+ GET / 500 in 118ms (compile: 71ms, render: 47ms)
+ GET / 200 in 408ms (compile: 51ms, render: 357ms)
+✓ Compiled in 197ms
+✓ Compiled in 184ms
+✓ Compiled in 181ms
+ GET / 200 in 618ms (compile: 132ms, render: 485ms)
+ GET / 200 in 102ms (compile: 4ms, render: 97ms)
+✓ Compiled in 132ms
+✓ Compiled in 155ms
+✓ Compiled in 46ms
+✓ Compiled in 93ms
+ GET / 200 in 475ms (compile: 105ms, render: 369ms)
+✓ Compiled in 79ms
+✓ Compiled in 137ms
+ GET / 200 in 166ms (compile: 54ms, render: 112ms)
+✓ Compiled in 55ms
+ GET / 200 in 218ms (compile: 138ms, render: 81ms)
+✓ Compiled in 152ms
+✓ Compiled in 121ms
+ GET / 200 in 232ms (compile: 80ms, render: 152ms)
+[?25h
