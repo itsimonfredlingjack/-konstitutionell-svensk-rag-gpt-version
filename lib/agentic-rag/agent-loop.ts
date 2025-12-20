@@ -12,8 +12,7 @@ const TOOL_MODEL = 'hermes3:8b';      // Tool calling - agent-finetuned, reliabl
 const ANSWER_MODEL = 'gpt-oss:20b';   // Answer model - user-facing Swedish responses
 const MAX_ITERATIONS = 3;             // Optimized: 3 is enough for most queries
 
-// n8n Hallucination Jail Warden - verifierar svar mot ChromaDB
-const JAIL_WARDEN_URL = 'http://localhost:5678/webhook/verify-answer';
+// Hallucination Jail Warden - verifierar alla svar mot 2M dokument i ChromaDB
 const JAIL_WARDEN_ENABLED = true;     // Toggle för att aktivera/deaktivera
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -447,12 +446,16 @@ function extractSwedishAnswer(thinking: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// HALLUCINATION JAIL WARDEN - n8n integration
+// HALLUCINATION JAIL WARDEN - Native TypeScript implementation
 // ═══════════════════════════════════════════════════════════════════════════
 // Verifierar GPT-OSS svar mot ChromaDB för att fånga hallucinationer.
-// Om hallucination hittas, regenereras svaret automatiskt.
-// Workflow: Hallucination Jail Warden (n8n ID: y116DfvDgjfbk5Xr)
+// 1. Extraherar claims med Hermes3
+// 2. Verifierar varje claim mot ChromaDB (2M dokument)
+// 3. Om hallucination → regenererar med GPT-OSS
 // ═══════════════════════════════════════════════════════════════════════════
+
+const CHROMADB_SEARCH_URL = 'http://localhost:8000/api/constitutional/search';
+const SIMILARITY_THRESHOLD = 0.65;  // Minimum score för att verifiera claim
 
 interface JailWardenResponse {
   status: 'VERIFIED' | 'REGENERATED' | 'ERROR';
@@ -461,6 +464,82 @@ interface JailWardenResponse {
   hallucinations?: number;
   original_hallucinations?: string[];
   regeneration_reason?: string;
+}
+
+async function extractClaims(answer: string): Promise<string[]> {
+  try {
+    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: TOOL_MODEL,
+        prompt: `Extrahera ALLA faktuella påståenden från detta svar. Fokusera på: lagnummer (SFS), årtal, myndigheter, beslut.
+
+SVAR: ${answer}
+
+Returnera ENDAST en JSON-array med påståenden:
+["påstående 1", "påstående 2"]`,
+        stream: false,
+        options: { temperature: 0.1, num_predict: 300 },
+      }),
+    });
+
+    const data = await response.json();
+    const content = data.response || '[]';
+
+    // Extract JSON array
+    const match = content.match(/\[[\s\S]*?\]/);
+    if (match) {
+      return JSON.parse(match[0]).filter((c: string) => c && c.length > 10);
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+async function verifyClaim(claim: string): Promise<{ verified: boolean; score: number }> {
+  try {
+    const response = await fetch(CHROMADB_SEARCH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: claim, limit: 3, page: 1, sort: 'relevance' }),
+    });
+
+    if (!response.ok) return { verified: false, score: 0 };
+
+    const data = await response.json();
+    const bestScore = data.results?.[0]?.score || 0;
+
+    return { verified: bestScore >= SIMILARITY_THRESHOLD, score: bestScore };
+  } catch {
+    return { verified: false, score: 0 };
+  }
+}
+
+async function regenerateAnswer(question: string, hallucinations: string[]): Promise<string> {
+  try {
+    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: ANSWER_MODEL,
+        prompt: `Du är en juridisk expert. Användaren frågade: ${question}
+
+Ditt tidigare svar innehöll FELAKTIGA påståenden som inte kunde verifieras:
+${hallucinations.map(h => `- ${h}`).join('\n')}
+
+Skriv ett NYTT svar som ENDAST innehåller information du är säker på. Om du inte vet, säg det. Svara på svenska.`,
+        stream: false,
+        options: { temperature: 0.3, num_predict: 500 },
+      }),
+    });
+
+    const data = await response.json();
+    return data.thinking || data.response || 'Kunde inte generera nytt svar.';
+  } catch {
+    return 'Fel vid regenerering.';
+  }
 }
 
 async function verifyWithJailWarden(
@@ -474,32 +553,51 @@ async function verifyWithJailWarden(
   console.log('\n🚨 JAIL WARDEN - Verifierar svar mot ChromaDB...');
 
   try {
-    const response = await fetch(JAIL_WARDEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, answer }),
-    });
+    // 1. Extract claims
+    const claims = await extractClaims(answer);
+    console.log(`   📋 ${claims.length} påståenden extraherade`);
 
-    if (!response.ok) {
-      console.log(`⚠️ Jail Warden ej tillgänglig (${response.status}), använder originalsvaret`);
-      return { status: 'VERIFIED', answer };
+    if (claims.length === 0) {
+      console.log(`   ✅ Inga verifierbara claims - godkänt`);
+      return { status: 'VERIFIED', answer, verified_claims: 0 };
     }
 
-    const result: JailWardenResponse = await response.json();
+    // 2. Verify each claim against ChromaDB
+    const hallucinations: string[] = [];
+    let verifiedCount = 0;
 
-    if (result.status === 'VERIFIED') {
-      console.log(`✅ VERIFIED - ${result.verified_claims || 0} påståenden bekräftade`);
-    } else if (result.status === 'REGENERATED') {
-      console.log(`🔄 REGENERATED - Hallucination upptäckt!`);
-      console.log(`   Falska påståenden: ${result.original_hallucinations?.join(', ')}`);
+    for (const claim of claims) {
+      const result = await verifyClaim(claim);
+      if (result.verified) {
+        verifiedCount++;
+        console.log(`   ✅ "${claim.substring(0, 40)}..." (${(result.score * 100).toFixed(0)}%)`);
+      } else {
+        hallucinations.push(claim);
+        console.log(`   ❌ "${claim.substring(0, 40)}..." (${(result.score * 100).toFixed(0)}%)`);
+      }
     }
 
-    return result;
+    // 3. If hallucinations found, regenerate
+    if (hallucinations.length > 0) {
+      console.log(`\n🔄 ${hallucinations.length} hallucinationer! Regenererar...`);
+      const newAnswer = await regenerateAnswer(question, hallucinations);
+
+      return {
+        status: 'REGENERATED',
+        answer: newAnswer,
+        verified_claims: verifiedCount,
+        hallucinations: hallucinations.length,
+        original_hallucinations: hallucinations,
+        regeneration_reason: 'Overifierade påståenden upptäcktes',
+      };
+    }
+
+    console.log(`   ✅ VERIFIED - Alla ${verifiedCount} påståenden bekräftade!`);
+    return { status: 'VERIFIED', answer, verified_claims: verifiedCount };
 
   } catch (error) {
     console.log(`⚠️ Jail Warden-fel: ${error}`);
-    // Fallback: returnera originalet
-    return { status: 'VERIFIED', answer };
+    return { status: 'ERROR', answer };
   }
 }
 
