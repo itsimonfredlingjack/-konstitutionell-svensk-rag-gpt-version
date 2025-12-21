@@ -10,6 +10,16 @@
 
 import { TOOLS, getTool, type ToolResult } from './tools';
 import { logMetric } from '../api';
+import {
+  ANSWER_PROFILE,
+  TOOL_PROFILE,
+  JSON_PROFILE,
+  FINALIZER_PROFILE,
+  buildAnswerPrompt,
+  enforceCitationPolicy,
+  validateStructure,
+  type SourceDocument,
+} from '../swedish-prompt-profiles';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONFIGURATION - llama-server only (NO Ollama/Hermes)
@@ -263,12 +273,14 @@ async function getAgentThought(
     }
   ];
 
+  // Use TOOL_PROFILE from swedish-prompt-profiles.ts
+  const systemPrompt = `${TOOL_PROFILE.systemPrompt}
+${docsFound >= 3 ? 'Du har tillräckligt med dokument - använd done.' : 'Sök efter relevanta dokument.'}`;
+
   const messages = [
     {
       role: 'system',
-      content: `Du är en RAG-agent. Välj rätt verktyg.
-${docsFound >= 3 ? 'Du har tillräckligt med dokument - använd done.' : 'Sök efter relevanta dokument.'}
-`
+      content: systemPrompt
     },
     { role: 'user', content: question }
   ];
@@ -285,8 +297,8 @@ ${docsFound >= 3 ? 'Du har tillräckligt med dokument - använd done.' : 'Sök e
         model: ANSWER_MODEL,
         messages,
         tools,
-        temperature: 0.1,
-        max_tokens: 150,
+        temperature: TOOL_PROFILE.temperature,
+        max_tokens: TOOL_PROFILE.max_tokens,
       }),
     });
 
@@ -366,24 +378,31 @@ function formatObservation(data: any): string {
 }
 
 async function generateFinalAnswer(question: string, steps: AgentStep[]): Promise<string> {
-  // Collect document context compactly
-  const allDocs: string[] = [];
+  // Collect document context and build sources
+  const sources: SourceDocument[] = [];
 
   for (const step of steps) {
     if (Array.isArray(step.observation.data)) {
-      step.observation.data.forEach((doc: any) => {
-        const preview = (doc.preview || doc.content || '').substring(0, 150);
-        allDocs.push(`• ${doc.title}: ${preview}`);
+      step.observation.data.forEach((doc: any, idx: number) => {
+        if (sources.length < 5) {  // Max 5 sources
+          sources.push({
+            id: doc.id || `doc-${idx}`,
+            title: doc.title || 'Okänt dokument',
+            content: doc.content || doc.preview || '',
+            sfs: doc.sfs,  // SFS number if available
+          });
+        }
       });
     }
   }
 
-  const context = allDocs.slice(0, 5).join('\n');
+  console.log(`\n🎯 Genererar slutsvar med ${ANSWER_MODEL} (${sources.length} källor)...`);
 
-  console.log(`\n🎯 Genererar slutsvar med ${ANSWER_MODEL} via llama-server...`);
+  // Build structured prompt with source citations
+  const { userPrompt, sourceCount } = buildAnswerPrompt(question, sources);
 
   try {
-    // Use llama-server /v1/chat/completions (OpenAI-compatible)
+    // Use ANSWER_PROFILE from swedish-prompt-profiles.ts
     const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -392,17 +411,15 @@ async function generateFinalAnswer(question: string, steps: AgentStep[]): Promis
         messages: [
           {
             role: 'system',
-            content: 'Du är en svensk juridisk expert. Svara koncist på svenska. Citera relevanta lagar och SFS-nummer.'
+            content: ANSWER_PROFILE.systemPrompt
           },
           {
             role: 'user',
-            content: context
-              ? `Baserat på dessa dokument:\n${context}\n\nFråga: ${question}`
-              : question
+            content: userPrompt
           }
         ],
-        temperature: 0.7,
-        max_tokens: 500,
+        temperature: ANSWER_PROFILE.temperature,
+        max_tokens: ANSWER_PROFILE.max_tokens,
       }),
     });
 
@@ -422,9 +439,31 @@ async function generateFinalAnswer(question: string, steps: AgentStep[]): Promis
     if (!answer) {
       console.warn('⚠️ GPT-OSS: content empty, running finalizer');
       answer = await runAgentFinalizer(question);
+      return answer;
     }
 
-    return answer || 'Inget svar kunde genereras.';
+    // SWEDISH UX HARDENING: Enforce citation policy
+    const { cleaned, violations } = enforceCitationPolicy(answer, sourceCount);
+    if (violations.length > 0) {
+      logMetric('citation_violations_removed', { 
+        violations: violations.join(', '),
+        source_count: sourceCount 
+      });
+      console.warn(`⚠️  Removed invalid citations: ${violations.join(', ')}`);
+    }
+
+    // SWEDISH UX HARDENING: Validate structure
+    const structureViolations = validateStructure(cleaned, sourceCount);
+    if (structureViolations.length > 0) {
+      logMetric('structure_violations_detected', {
+        violations: structureViolations.map(v => v.type),
+        line_count: cleaned.split('\n').length,
+      });
+      console.warn(`⚠️  Structure violations: ${structureViolations.map(v => v.type).join(', ')}`);
+      // TODO: Implement style finalizer if violations are severe
+    }
+
+    return cleaned || 'Inget svar kunde genereras.';
 
   } catch (error) {
     console.error('Answer generation error:', error);
@@ -438,6 +477,7 @@ async function generateFinalAnswer(question: string, steps: AgentStep[]): Promis
  */
 async function runAgentFinalizer(originalQuestion: string): Promise<string> {
   try {
+    // Use FINALIZER_PROFILE from swedish-prompt-profiles.ts
     const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -446,12 +486,12 @@ async function runAgentFinalizer(originalQuestion: string): Promise<string> {
         messages: [
           { 
             role: 'system', 
-            content: 'Svara ENDAST på svenska. Max 3 meningar. Ingen analys, bara svaret.'
+            content: FINALIZER_PROFILE.systemPrompt
           },
           { role: 'user', content: `Svara kort: ${originalQuestion}` }
         ],
-        temperature: 0.3,
-        max_tokens: 150,
+        temperature: FINALIZER_PROFILE.temperature,
+        max_tokens: FINALIZER_PROFILE.max_tokens,
       }),
     });
 
@@ -460,8 +500,7 @@ async function runAgentFinalizer(originalQuestion: string): Promise<string> {
     }
 
     const data = await response.json();
-    // Log fallback usage for metrics
-    console.warn('📊 METRICS: Finalizer triggered for content-empty recovery');
+    logMetric('finalizer_triggered', { reason: 'content_empty_agent_loop' });
     return data.choices?.[0]?.message?.content || 'Inget svar kunde genereras.';
   } catch {
     return 'Fel vid generering av svar.';
@@ -549,7 +588,7 @@ async function extractClaims(answer: string): Promise<string[]> {
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      // Use llama-server /v1/chat/completions with JSON schema enforcement
+      // Use JSON_PROFILE from swedish-prompt-profiles.ts
       const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -558,36 +597,30 @@ async function extractClaims(answer: string): Promise<string[]> {
           messages: [
             {
               role: 'system',
-              content: 'Du extraherar faktuella påståenden från text. Svara ENDAST med en JSON-array.'
+              content: JSON_PROFILE.systemPrompt
             },
             {
               role: 'user',
-              content: `Extrahera ALLA faktuella påståenden från detta svar. Fokusera på: lagnummer (SFS), årtal, myndigheter, beslut.
-
-SVAR: ${answer}
-
-Returnera ENDAST en JSON-array med påståenden:
-["påstående 1", "påstående 2"]`
+              content: `TEXT ATT ANALYSERA:\n${answer}`
             }
           ],
-          temperature: 0.1,
-          max_tokens: 300,
+          temperature: JSON_PROFILE.temperature,
+          max_tokens: JSON_PROFILE.max_tokens,
           response_format: { type: "json_object" }  // Primary enforcement
         }),
       });
 
       const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || '[]';
+      const content = data.choices?.[0]?.message?.content || '{}';
 
-      // Parse JSON - handle both object and array formats
+      // Parse JSON - handle multiple formats
       let parsed: any;
       
-      // Try parsing as JSON object first
       try {
         parsed = JSON.parse(content);
       } catch {
-        // Try extracting JSON array from text
-        const match = content.match(/\[[\s\S]*?\]/);
+        // Try extracting JSON from text
+        const match = content.match(/\{[\s\S]*?\}|\[[\s\S]*?\]/);
         if (match) {
           parsed = JSON.parse(match[0]);
         } else {
@@ -595,12 +628,17 @@ Returnera ENDAST en JSON-array med påståenden:
         }
       }
       
-      // Convert object format to array if needed
+      // Extract claims array from various formats
       let claims: string[] = [];
+      
       if (Array.isArray(parsed)) {
+        // Format: ["claim1", "claim2"]
         claims = parsed;
+      } else if (parsed.claims && Array.isArray(parsed.claims)) {
+        // Format: {"claims": ["claim1", "claim2"]} (JSON_PROFILE format)
+        claims = parsed.claims;
       } else if (typeof parsed === 'object') {
-        // Handle {"påstående 1": "...", "påstående 2": "..."} format
+        // Format: {"påstående 1": "...", "påstående 2": "..."}
         claims = Object.values(parsed).filter(v => typeof v === 'string');
       }
       
