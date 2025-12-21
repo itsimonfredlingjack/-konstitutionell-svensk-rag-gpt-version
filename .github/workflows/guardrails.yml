@@ -1,0 +1,58 @@
+name: Guardrails - Forbidden Patterns Check
+on: [push, pull_request]
+
+jobs:
+  check-forbidden-patterns:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Block Hermes references
+        run: |
+          if grep -rE "hermes3|hermes-3|TOOL_MODEL.*hermes" lib/ --include="*.ts" --include="*.tsx"; then
+            echo "ERROR: Hermes references found in runtime code. Hermes is permanently removed."
+            exit 1
+          fi
+          echo "OK: No Hermes references found"
+
+      - name: Block Ollama port 11434
+        run: |
+          if grep -rE ":11434|OLLAMA_URL" lib/ --include="*.ts" --include="*.tsx" | grep -v ".backup"; then
+            echo "ERROR: Port 11434 (Ollama) found in runtime code."
+            exit 1
+          fi
+          echo "OK: No port 11434 references found"
+
+      - name: Block legacy completions endpoint
+        run: |
+          if grep -rE '"/v1/completions"' lib/ --include="*.ts" --include="*.tsx"; then
+            echo "ERROR: /v1/completions endpoint found. Use /v1/chat/completions instead."
+            exit 1
+          fi
+          echo "OK: No /v1/completions references found"
+
+      - name: Block Reasoning patterns in prompts
+        run: |
+          if grep -rE 'Reasoning: (low|medium|high)' lib/ --include="*.ts" --include="*.tsx"; then
+            echo "ERROR: Reasoning patterns found in prompts. Server controls reasoning."
+            exit 1
+          fi
+          echo "OK: No Reasoning patterns in prompts"
+
+      - name: Block reasoning_content parsing for user display
+        run: |
+          if grep -rE 'reasoning_content.*(match|substring|slice|split)' lib/ --include="*.ts" --include="*.tsx"; then
+            echo "ERROR: reasoning_content parsing found. Never expose CoT to users."
+            exit 1
+          fi
+          echo "OK: No reasoning_content parsing for user display"
+
+      - name: Block reasoning_content in UI components
+        run: |
+          if grep -rE 'reasoning_content' app/ components/ --include="*.tsx" --include="*.ts" 2>/dev/null || true; then
+            if grep -rE 'reasoning_content' app/ components/ --include="*.tsx" --include="*.ts" 2>/dev/null | grep -v "//.*reasoning_content"; then
+              echo "ERROR: reasoning_content found in UI components. Never expose CoT to users."
+              exit 1
+            fi
+          fi
+          echo "OK: No reasoning_content in UI components"

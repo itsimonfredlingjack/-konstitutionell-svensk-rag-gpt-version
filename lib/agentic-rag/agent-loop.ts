@@ -2,37 +2,41 @@
  * Constitutional AI - Agentic RAG Loop (OPTIMIZED)
  *
  * ReAct pattern: Reason → Act → Observe → Repeat
- * Hermes-3 for tool calling, GPT-OSS 20B for answers
+ * GPT-OSS 20B via llama-server for all LLM calls
+ * 
+ * NOTE: Hermes removed. Tool-calling disabled until gpt-oss supports structured tool_calls.
+ * Using direct RAG: search → context → LLM
  */
 
-import { TOOLS, getTool, routeWithFunctionGemma, type ToolResult } from './tools';
+import { TOOLS, getTool, type ToolResult } from './tools';
+import { logMetric } from '../api';
 
-const OLLAMA_URL = 'http://localhost:11434';
-const TOOL_MODEL = 'hermes3:8b';      // Tool calling - agent-finetuned, reliable JSON
-const ANSWER_MODEL = 'gpt-oss:20b';   // Answer model - user-facing Swedish responses
-const MAX_ITERATIONS = 3;             // Optimized: 3 is enough for most queries
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIGURATION - llama-server only (NO Ollama/Hermes)
+// ═══════════════════════════════════════════════════════════════════════════
+const LLAMA_SERVER_URL = 'http://localhost:8080';
+const ANSWER_MODEL = 'gpt-oss';   // Answer model via llama-server
+const MAX_ITERATIONS = 3;         // Optimized: 3 is enough for most queries
 
 // Hallucination Jail Warden - verifierar alla svar mot 2M dokument i ChromaDB
-const JAIL_WARDEN_ENABLED = true;     // Toggle för att aktivera/deaktivera
+const JAIL_WARDEN_ENABLED = true;
+
+// Tool-calling status (tested 2024-12-21)
+// gpt-oss DOES support structured tool_calls via /v1/chat/completions!
+const TOOL_CALLING_ENABLED = true;  // ENABLED: gpt-oss returns valid tool_calls JSON
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MODELL-KONFIGURATION - ÄNDRA INTE UTAN ATT FÖRSTÅ VARFÖR
+// MODELL-KONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// TOOL_MODEL = hermes3:8b
-//   - Agent-finetunad för tool calling
-//   - Pålitlig JSON-output
-//   - ANVÄNDS FÖR: ReAct-loopen, verktygsval
-//
-// ANSWER_MODEL = gpt-oss:20b
+// ANSWER_MODEL = gpt-oss (via llama-server on port 8080)
 //   - BÄSTA generalist-modellen
 //   - Stark på resonemang, analys, juridik
-//   - ANVÄNDS FÖR: Slutsvar till användaren
-//   - OBS: Svarar i "thinking"-fältet, extraheras av formatGptOssAnswer()
+//   - ANVÄNDS FÖR: Alla LLM-anrop (slutsvar, resonemang)
+//   - Körs med Harmony template via --jinja
+//   - Reasoning control: via --chat-template-kwargs on server (default: low)
 //
-// FunctionGemma (270M) - Optional snabb routing hint
-//
-// RADERA INTE GPT-OSS - Den är huvudmodellen för användarkommunikation!
+// RADERA INTE GPT-OSS - Den är huvudmodellen för all kommunikation!
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -81,11 +85,8 @@ export async function runAgent(question: string): Promise<AgentResponse> {
   let isDone = false;
   let finalAnswer = '';
 
-  // Fast routing with FunctionGemma (optional optimization)
-  const fastRoute = await routeWithFunctionGemma(question);
-  if (fastRoute && fastRoute.name !== 'done') {
-    console.log(`⚡ FunctionGemma föreslår: ${fastRoute.name}`);
-  }
+  // NOTE: FunctionGemma routing DISABLED (used Ollama)
+  // Using direct RAG strategy instead
 
   // State for smart decisions
   let lastObservation = '';
@@ -211,62 +212,130 @@ async function getAgentThought(
   // Extract key subject from question for better search fallback
   const keySubject = extractKeySubject(question);
 
-  // Compact prompt with search guidance
-  const prompt = `FRÅGA: ${question}
-
-${lastObservation ? `HITTADE (${docsFound} docs):\n${lastObservation.substring(0, 800)}\n` : ''}
-${docsFound >= 5 ? '⚡ Du har hittat tillräckligt! Använd "done" för att avsluta.\n' : ''}
-VERKTYG: search_documents (query=ÄMNET, tex "${keySubject}"), think_longer, done
-
-JSON svar:`;
-
-  const response = await fetch(`${OLLAMA_URL}/api/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: TOOL_MODEL,
-      prompt,
-      stream: false,
-      options: {
-        temperature: 0.1,    // Lower = more deterministic
-        num_predict: 150,    // JSON doesn't need much
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Ollama error: ${response.status}`);
+  // Early exit if we have enough docs
+  if (docsFound >= 5) {
+    return { reasoning: 'Har tillräckligt med dokument', action: 'done', action_input: {} };
   }
 
-  const data = await response.json();
-  let content = data.response || '{}';
-
-  // Extract JSON from markdown code blocks if present
-  const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (jsonMatch) {
-    content = jsonMatch[1].trim();
+  if (!TOOL_CALLING_ENABLED) {
+    // Direct RAG fallback
+    if (iteration === 1) {
+      return {
+        reasoning: 'Söker dokument om ämnet',
+        action: 'search_documents',
+        action_input: { query: keySubject },
+      };
+    }
+    if (docsFound > 0) {
+      return { reasoning: 'Har hittat dokument, avslutar', action: 'done', action_input: {} };
+    }
+    return {
+      reasoning: 'Försöker bredare sökning',
+      action: 'search_documents',
+      action_input: { query: question.split(' ').slice(0, 3).join(' ') },
+    };
   }
 
-  // Also try to find JSON object directly
-  const jsonObjMatch = content.match(/\{[\s\S]*\}/);
-  if (jsonObjMatch) {
-    content = jsonObjMatch[0];
+  // TOOL-CALLING ENABLED: Use gpt-oss via llama-server
+  const tools = [
+    {
+      type: 'function',
+      function: {
+        name: 'search_documents',
+        description: 'Söker i ChromaDB med svenska myndighetsdokument',
+        parameters: {
+          type: 'object',
+          properties: { query: { type: 'string', description: 'Sökfrågan' } },
+          required: ['query']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'done',
+        description: 'Signalerar att sökningen är klar',
+        parameters: {
+          type: 'object',
+          properties: { summary: { type: 'string', description: 'Sammanfattning' } }
+        }
+      }
+    }
+  ];
+
+  const messages = [
+    {
+      role: 'system',
+      content: `Du är en RAG-agent. Välj rätt verktyg.
+${docsFound >= 3 ? 'Du har tillräckligt med dokument - använd done.' : 'Sök efter relevanta dokument.'}
+`
+    },
+    { role: 'user', content: question }
+  ];
+
+  if (lastObservation) {
+    messages.push({ role: 'assistant', content: `Hittade: ${lastObservation}` });
   }
 
   try {
-    const parsed = JSON.parse(content);
-    return {
-      reasoning: parsed.reasoning || 'Söker...',
-      action: parsed.action || (docsFound >= 5 ? 'done' : 'search_documents'),
-      action_input: parsed.action_input || { query: question },
-    };
-  } catch {
-    // Smart fallback based on state
-    if (docsFound >= 5) {
-      return { reasoning: 'Har tillräckligt', action: 'done', action_input: {} };
+    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: ANSWER_MODEL,
+        messages,
+        tools,
+        temperature: 0.1,
+        max_tokens: 150,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`llama-server error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+
+    if (toolCall?.function) {
+      try {
+        const args = JSON.parse(toolCall.function.arguments || '{}');
+        return {
+          reasoning: `Tool: ${toolCall.function.name}`,  // Never expose reasoning_content
+          action: toolCall.function.name,
+          action_input: args,
+        };
+      } catch (parseError) {
+        logMetric('tool_args_parse_failed', {
+          function: 'decide',
+          tool_name: toolCall.function.name,
+          raw_args: toolCall.function.arguments,
+          error: String(parseError)
+        });
+        // Fallback with empty args rather than crashing
+        return {
+          reasoning: `Tool: ${toolCall.function.name} (args parse failed)`,
+          action: toolCall.function.name,
+          action_input: {},
+        };
+      }
+    }
+
+    // No tool call - default to done if we have docs
+    if (docsFound > 0) {
+      return { reasoning: 'Avslutar sökning', action: 'done', action_input: {} };
     }
     return {
-      reasoning: 'Söker dokument',
+      reasoning: 'Fallback till sökning',
+      action: 'search_documents',
+      action_input: { query: keySubject },
+    };
+
+  } catch (error) {
+    console.error('Tool-calling error:', error);
+    // Fallback to direct RAG
+    return {
+      reasoning: 'Fel vid tool-calling, fallback',
       action: 'search_documents',
       action_input: { query: keySubject },
     };
@@ -297,7 +366,7 @@ function formatObservation(data: any): string {
 }
 
 async function generateFinalAnswer(question: string, steps: AgentStep[]): Promise<string> {
-  // Collect observations compactly
+  // Collect document context compactly
   const allDocs: string[] = [];
 
   for (const step of steps) {
@@ -309,38 +378,51 @@ async function generateFinalAnswer(question: string, steps: AgentStep[]): Promis
     }
   }
 
-  // Simple prompt - GPT-OSS responds in Swedish with simple prompts
-  const prompt = question;
+  const context = allDocs.slice(0, 5).join('\n');
 
-  console.log(`\n🎯 Genererar slutsvar med ${ANSWER_MODEL}...`);
-  console.log(`   Prompt: "${prompt}"`);
+  console.log(`\n🎯 Genererar slutsvar med ${ANSWER_MODEL} via llama-server...`);
 
   try {
-    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+    // Use llama-server /v1/chat/completions (OpenAI-compatible)
+    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: ANSWER_MODEL,
-        prompt,
-        stream: false,
-        options: {
-          temperature: 0.7,
-          num_predict: 300,
-        },
+        messages: [
+          {
+            role: 'system',
+            content: 'Du är en svensk juridisk expert. Svara koncist på svenska. Citera relevanta lagar och SFS-nummer.'
+          },
+          {
+            role: 'user',
+            content: context
+              ? `Baserat på dessa dokument:\n${context}\n\nFråga: ${question}`
+              : question
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 500,
       }),
     });
 
     if (!response.ok) {
+      console.error(`llama-server error: ${response.status}`);
       return 'Kunde inte generera slutsvar.';
     }
 
     const data = await response.json();
+    const message = data.choices?.[0]?.message;
 
-    // GPT-OSS always puts content in thinking field
-    const thinking = data.thinking || data.response || '';
+    // Harmony template: content = final answer
+    // IMPORTANT: Never expose reasoning_content to users
+    let answer = message?.content || '';
 
-    // Extract and format the answer from thinking
-    const answer = formatGptOssAnswer(thinking, question);
+    // Content-empty recovery: run finalizer (no reasoning_content parsing)
+    if (!answer) {
+      console.warn('⚠️ GPT-OSS: content empty, running finalizer');
+      answer = await runAgentFinalizer(question);
+    }
 
     return answer || 'Inget svar kunde genereras.';
 
@@ -350,7 +432,43 @@ async function generateFinalAnswer(question: string, steps: AgentStep[]): Promis
   }
 }
 
-// Format GPT-OSS thinking into a proper Swedish answer
+/**
+ * Finalizer: Force a direct Swedish answer when content-empty recovery is needed.
+ * Uses a simple prompt that bypasses thinking mode.
+ */
+async function runAgentFinalizer(originalQuestion: string): Promise<string> {
+  try {
+    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: ANSWER_MODEL,
+        messages: [
+          { 
+            role: 'system', 
+            content: 'Svara ENDAST på svenska. Max 3 meningar. Ingen analys, bara svaret.'
+          },
+          { role: 'user', content: `Svara kort: ${originalQuestion}` }
+        ],
+        temperature: 0.3,
+        max_tokens: 150,
+      }),
+    });
+
+    if (!response.ok) {
+      return 'Kunde inte generera svar.';
+    }
+
+    const data = await response.json();
+    // Log fallback usage for metrics
+    console.warn('📊 METRICS: Finalizer triggered for content-empty recovery');
+    return data.choices?.[0]?.message?.content || 'Inget svar kunde genereras.';
+  } catch {
+    return 'Fel vid generering av svar.';
+  }
+}
+
+// Format GPT-OSS thinking into a proper Swedish answer (DEPRECATED - kept for reference)
 function formatGptOssAnswer(thinking: string, question: string): string {
   // Find actual law names (not "Allemansrätten" itself which is the subject)
   const lawMatches: string[] = [];
@@ -402,55 +520,15 @@ function formatGptOssAnswer(thinking: string, question: string): string {
   return 'Allemansrätten regleras av Miljöbalken och Naturvårdsverkets föreskrifter.';
 }
 
-// Extract Swedish content from GPT-OSS "thinking" field
-function extractSwedishAnswer(thinking: string): string {
-  // Split by sentence boundaries
-  const sentences = thinking.split(/(?<=[.!?])\s+/);
-  const swedishSentences: string[] = [];
-
-  for (const sentence of sentences) {
-    const trimmed = sentence.trim();
-    if (trimmed.length < 15) continue;
-
-    // Skip English meta-commentary
-    if (/^(we need|let me|the user|i should|actually|wait|so |the question|the main|based on|looking at|provide|recall|no,)/i.test(trimmed)) continue;
-    if (/\b(we need to|let's|the user|i should|actually the)\b/i.test(trimmed)) continue;
-
-    // Check if sentence is Swedish (has Swedish chars or Swedish words)
-    const hasSwedishChars = /[åäöÅÄÖ]/.test(trimmed);
-    const hasSwedishWords = /\b(är|och|som|för|med|ska|kan|till|från|genom|enligt|regleras|lagen|lagar|rätten)\b/.test(trimmed);
-    const hasSFS = /SFS\s*\d{4}:\d+|\d{4}:\d{3,}/.test(trimmed);
-
-    if (hasSwedishChars || hasSwedishWords || hasSFS) {
-      // Clean up the sentence
-      let clean = trimmed
-        .replace(/^["'\s]+/, '')  // Remove leading quotes
-        .replace(/["'\s]+$/, ''); // Remove trailing quotes
-      swedishSentences.push(clean);
-    }
-  }
-
-  if (swedishSentences.length > 0) {
-    return swedishSentences.join(' ').substring(0, 600);
-  }
-
-  // Fallback: Look for SFS numbers and surrounding text
-  const sfsMatch = thinking.match(/(\w+\s+){0,5}SFS\s*\d{4}:\d+(\s+\w+){0,10}/g);
-  if (sfsMatch) {
-    return sfsMatch.join('. ').substring(0, 400);
-  }
-
-  // Last resort: return first non-English sentence
-  const firstNonEnglish = sentences.find(s => !/^(we |the |based |provide |let |i )/i.test(s.trim()));
-  return (firstNonEnglish || 'Se dokumenten ovan.').substring(0, 300);
-}
+// REMOVED: extractSwedishAnswer - Never parse reasoning_content for user display
+// Use runAgentFinalizer() instead for content-empty recovery
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HALLUCINATION JAIL WARDEN - Native TypeScript implementation
 // ═══════════════════════════════════════════════════════════════════════════
 // Verifierar GPT-OSS svar mot ChromaDB för att fånga hallucinationer.
-// 1. Extraherar claims med Hermes3
-// 2. Verifierar varje claim mot ChromaDB (2M dokument)
+// 1. Extraherar claims med GPT-OSS
+// 2. Verifierar varje claim mot ChromaDB (535K dokument)
 // 3. Om hallucination → regenererar med GPT-OSS
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -467,35 +545,99 @@ interface JailWardenResponse {
 }
 
 async function extractClaims(answer: string): Promise<string[]> {
-  try {
-    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: TOOL_MODEL,
-        prompt: `Extrahera ALLA faktuella påståenden från detta svar. Fokusera på: lagnummer (SFS), årtal, myndigheter, beslut.
+  const maxRetries = 2;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      // Use llama-server /v1/chat/completions with JSON schema enforcement
+      const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: ANSWER_MODEL,
+          messages: [
+            {
+              role: 'system',
+              content: 'Du extraherar faktuella påståenden från text. Svara ENDAST med en JSON-array.'
+            },
+            {
+              role: 'user',
+              content: `Extrahera ALLA faktuella påståenden från detta svar. Fokusera på: lagnummer (SFS), årtal, myndigheter, beslut.
 
 SVAR: ${answer}
 
 Returnera ENDAST en JSON-array med påståenden:
-["påstående 1", "påstående 2"]`,
-        stream: false,
-        options: { temperature: 0.1, num_predict: 300 },
-      }),
-    });
+["påstående 1", "påstående 2"]`
+            }
+          ],
+          temperature: 0.1,
+          max_tokens: 300,
+          response_format: { type: "json_object" }  // Primary enforcement
+        }),
+      });
 
-    const data = await response.json();
-    const content = data.response || '[]';
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || '[]';
 
-    // Extract JSON array
-    const match = content.match(/\[[\s\S]*?\]/);
-    if (match) {
-      return JSON.parse(match[0]).filter((c: string) => c && c.length > 10);
+      // Parse JSON - handle both object and array formats
+      let parsed: any;
+      
+      // Try parsing as JSON object first
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        // Try extracting JSON array from text
+        const match = content.match(/\[[\s\S]*?\]/);
+        if (match) {
+          parsed = JSON.parse(match[0]);
+        } else {
+          throw new Error('No valid JSON found in response');
+        }
+      }
+      
+      // Convert object format to array if needed
+      let claims: string[] = [];
+      if (Array.isArray(parsed)) {
+        claims = parsed;
+      } else if (typeof parsed === 'object') {
+        // Handle {"påstående 1": "...", "påstående 2": "..."} format
+        claims = Object.values(parsed).filter(v => typeof v === 'string');
+      }
+      
+      const filtered = claims.filter((c: string) => c && c.length > 10);
+      
+      if (attempt > 0) {
+        logMetric('json_parse_retry_success', { 
+          function: 'extractClaims', 
+          attempt: attempt + 1,
+          claims_count: filtered.length 
+        });
+      }
+      
+      return filtered;
+      
+    } catch (error) {
+      if (attempt < maxRetries) {
+        logMetric('json_parse_retry', { 
+          function: 'extractClaims', 
+          attempt: attempt + 1,
+          error: String(error)
+        });
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 100));
+        continue;
+      } else {
+        logMetric('json_parse_failed', { 
+          function: 'extractClaims',
+          total_attempts: attempt + 1,
+          error: String(error)
+        });
+        return [];
+      }
     }
-    return [];
-  } catch {
-    return [];
   }
+  
+  return [];
 }
 
 async function verifyClaim(claim: string): Promise<{ verified: boolean; score: number }> {
@@ -519,24 +661,34 @@ async function verifyClaim(claim: string): Promise<{ verified: boolean; score: n
 
 async function regenerateAnswer(question: string, hallucinations: string[]): Promise<string> {
   try {
-    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+    // Use llama-server /v1/chat/completions
+    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: ANSWER_MODEL,
-        prompt: `Du är en juridisk expert. Användaren frågade: ${question}
+        messages: [
+          {
+            role: 'system',
+            content: 'Du är en juridisk expert. Skriv ENDAST information du är säker på. Om du inte vet, säg det.'
+          },
+          {
+            role: 'user',
+            content: `Användaren frågade: ${question}
 
 Ditt tidigare svar innehöll FELAKTIGA påståenden som inte kunde verifieras:
 ${hallucinations.map(h => `- ${h}`).join('\n')}
 
-Skriv ett NYTT svar som ENDAST innehåller information du är säker på. Om du inte vet, säg det. Svara på svenska.`,
-        stream: false,
-        options: { temperature: 0.3, num_predict: 500 },
+Skriv ett NYTT svar som ENDAST innehåller korrekt information. Svara på svenska.`
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 500,
       }),
     });
 
     const data = await response.json();
-    return data.thinking || data.response || 'Kunde inte generera nytt svar.';
+    return data.choices?.[0]?.message?.content || 'Kunde inte generera nytt svar.';
   } catch {
     return 'Fel vid regenerering.';
   }
