@@ -153,6 +153,11 @@ export interface ChatMessage {
   reasoning?: string[];
   timestamp: Date;
   loading?: boolean;
+  // Verification status
+  verified?: boolean;        // true only if sources > 0 AND warden verified (HIGH evidence)
+  wasRouted?: boolean;       // true if handled without RAG
+  queryType?: string;        // SMALLTALK, LEGAL_QUERY, etc.
+  evidenceLevel?: 'HIGH' | 'LOW' | 'NONE';  // For nuanced UI display
 }
 
 export function useChat() {
@@ -182,6 +187,16 @@ export function useChat() {
     try {
       const response = await agentQuery(content);
 
+      // Determine verification status:
+      // - verified = true ONLY if warden status is FACT_VERIFIED (high evidence)
+      // - hasSource = sources > 0 (for showing "relaterade träffar")
+      // - wasRouted = true if query was handled without RAG (smalltalk, meta)
+      const hasRealSources = response.sources && response.sources.length > 0;
+      
+      // STRICT: Only FACT_VERIFIED means the answer is actually grounded in sources
+      // TERM_CORRECTED and CITATIONS_STRIPPED mean sources exist but evidence may be weak
+      const isVerified = response.warden_status === 'FACT_VERIFIED';
+
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === assistantId
@@ -191,6 +206,10 @@ export function useChat() {
                 sources: response.sources,
                 reasoning: response.reasoning_steps,
                 loading: false,
+                verified: isVerified,
+                wasRouted: response.was_routed,
+                queryType: response.query_type,
+                evidenceLevel: response.evidence_level,
               }
             : msg
         )
@@ -270,9 +289,9 @@ export interface PipelineStep {
 
 export function usePipelineStatus() {
   const [steps, setSteps] = useState<PipelineStep[]>([
-    { id: 'gemma', name: 'FunctionGemma', role: 'Routing', status: 'idle' },
-    { id: 'hermes', name: 'Hermes-3', role: 'Tool Calling', status: 'idle' },
-    { id: 'gpt-oss', name: 'GPT-OSS', role: 'Svar', status: 'idle' },
+    { id: 'search', name: 'ChromaDB', role: 'Sökning', status: 'idle' },
+    { id: 'gpt-oss', name: 'GPT-OSS', role: 'Svar (llama-server)', status: 'idle' },
+    { id: 'warden', name: 'Jail Warden v2', role: 'Verifiering', status: 'idle' },
   ]);
 
   const updateStep = useCallback(

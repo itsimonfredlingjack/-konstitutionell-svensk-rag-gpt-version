@@ -378,37 +378,8 @@ export const SlimRail = () => {
                     )}
                 </AnimatePresence>
 
-                {/* B. LIVE EVENTS (Transient, Auto-Bottom) */}
-                <AnimatePresence>
-                    {isProcessing && (
-                        <motion.div
-                            initial={{ opacity: 0, height: 0, y: -10 }}
-                            animate={{ opacity: 1, height: 'auto', y: 0 }}
-                            exit={{ opacity: 0, height: 0, y: -10 }}
-                            className="pointer-events-auto bg-[#0F0F11]/80 backdrop-blur-md border border-white/10 rounded-xl overflow-hidden"
-                        >
-                            <div className="p-3 space-y-2">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                                    <span className="text-[10px] font-bold text-cyan-500 uppercase tracking-wider">Liveström</span>
-                                </div>
-                                <div className="space-y-1 font-mono text-[10px]">
-                                    {recentLogs.map((log, i) => (
-                                        <motion.div
-                                            key={i}
-                                            initial={{ opacity: 0, x: 5 }}
-                                            animate={{ opacity: 1 - (i * 0.3), x: 0 }}
-                                            className="text-zinc-300 truncate"
-                                        >
-                                            <span className="text-zinc-600 mr-2">{`>`}</span>
-                                            {log}
-                                        </motion.div>
-                                    ))}
-                                </div>
-                            </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                {/* B. LIVE EVENTS (Removed - Moved to IntelligenceHud) */}
+
 
             </div>
         </>

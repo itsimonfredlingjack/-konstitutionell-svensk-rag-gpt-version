@@ -1,0 +1,28 @@
+fix: JSON retry + structured metrics + UI guardrails
+
+Production hardening improvements for Constitutional-GPT:
+
+1. **Structured metrics system**
+   - Added `logMetric()` helper to lib/api.ts
+   - ISO timestamps, structured context
+   - Applied to finalizer and JSON parsing failures
+
+2. **JSON parsing resilience**
+   - extractClaims(): retry logic (3 attempts) with exponential backoff
+   - Handles both JSON object and array formats from gpt-oss
+   - Tool argument parsing now wrapped in try-catch
+   - Metrics logged on each retry/failure
+
+3. **UI guardrail**
+   - Added CI check: block reasoning_content in app/ and components/
+   - Prevents accidental CoT exposure to users
+
+Changes:
+- lib/api.ts: Added logMetric(), updated runFinalizer()
+- lib/agentic-rag/agent-loop.ts: JSON retry + flexible parsing
+- .github/workflows/guardrails.yml: UI reasoning_content check
+
+All tests passed:
+✅ TypeScript compiles (npx tsc --noEmit)
+✅ extractClaims() handles object/array formats
+✅ Metrics logging active

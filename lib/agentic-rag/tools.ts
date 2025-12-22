@@ -7,10 +7,10 @@
 // VERKTYG FÖR AGENTIC RAG
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// Dessa verktyg anropas av Hermes-3 (TOOL_MODEL) i agent-loop.ts.
-// Slutsvaret genereras av GPT-OSS (ANSWER_MODEL).
+// Tool-calling är ENABLED: gpt-oss stöder tool_calls via llama-server.
+// Verktyg anropas via direct RAG-strategi i agent-loop.ts.
 //
-// Se agent-loop.ts för modellkonfiguration.
+// Alla LLM-anrop går via llama-server (port 8080), INTE Ollama.
 // ═══════════════════════════════════════════════════════════════════════════
 
 const BACKEND_URL = 'http://localhost:8000';
@@ -274,7 +274,7 @@ async function webSearch(params: Record<string, any>): Promise<ToolResult> {
 // ─────────────────────────────────────────────────────────────────
 // think_longer - Multi-model ensemble för djupare analys
 // ─────────────────────────────────────────────────────────────────
-const OLLAMA_URL = 'http://localhost:11434';
+const LLAMA_SERVER_URL = 'http://localhost:8080';
 
 interface ModelResponse {
   model: string;
@@ -338,33 +338,33 @@ Ge ett koncist, välgrundat svar. Var specifik och citera källor om möjligt.`;
     console.log('   → n8n inte tillgänglig, kör lokal ensemble...');
   }
 
-  // Fallback: Local parallel calls to Ollama with different temperatures
+  // Fallback: Local parallel calls to llama-server with different temperatures
   try {
     const modelConfigs = [
-      { name: 'gpt-oss:20b', temp: 0.1, role: 'Strikt faktabaserad' },
-      { name: 'gpt-oss:20b', temp: 0.7, role: 'Balanserad analys' },
-      { name: 'gpt-oss:20b', temp: 0.9, role: 'Kreativ/explorativ' },
+      { name: 'gpt-oss', temp: 0.1, role: 'Strikt faktabaserad' },
+      { name: 'gpt-oss', temp: 0.7, role: 'Balanserad analys' },
+      { name: 'gpt-oss', temp: 0.9, role: 'Kreativ/explorativ' },
     ];
 
-    console.log(`   → Kör ${modelConfigs.length} parallella anrop lokalt...`);
+    console.log(`   → Kör ${modelConfigs.length} parallella anrop till llama-server...`);
 
-    // Run all models in parallel
+    // Run all models in parallel via llama-server /v1/chat/completions
     const promises = modelConfigs.map(async (config): Promise<ModelResponse> => {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-        const resp = await fetch(`${OLLAMA_URL}/api/generate`, {
+        const resp = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: config.name,
-            prompt: `[${config.role}]\n\n${analysisPrompt}`,
-            stream: false,
-            options: {
-              temperature: config.temp,
-              num_predict: 500,
-            },
+            messages: [
+              { role: 'system', content: `Du är en ${config.role.toLowerCase()} juridisk expert.` },
+              { role: 'user', content: analysisPrompt }
+            ],
+            temperature: config.temp,
+            max_tokens: 500,
           }),
           signal: controller.signal,
         });
@@ -379,7 +379,7 @@ Ge ett koncist, välgrundat svar. Var specifik och citera källor om möjligt.`;
         return {
           model: config.name,
           temperature: config.temp,
-          response: data.response || '',
+          response: data.choices?.[0]?.message?.content || '',
           confidence: 0.8, // Default confidence for local models
         };
       } catch {
@@ -537,97 +537,11 @@ export function getTool(name: string): Tool | undefined {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FUNCTIONGEMMA ROUTER - Lightweight tool routing (270M model, ~200ms)
+// TOOL ROUTING - DISABLED (FunctionGemma/Hermes removed)
 // ═══════════════════════════════════════════════════════════════════════════
-
-interface ToolCall {
-  name: string;
-  arguments: Record<string, any>;
-}
-
-/**
- * Use FunctionGemma (270M) to quickly route to the right tool
- * Much faster than using the full 20B model for tool selection
- *
- * NOTE: FunctionGemma is best at concrete tools (search, datetime, web_search)
- * For abstract reasoning like think_longer, use main model
- */
-export async function routeWithFunctionGemma(userQuery: string): Promise<ToolCall | null> {
-  try {
-    // FunctionGemma works best with concrete tools - exclude think_longer
-    const concreteTools = TOOLS.filter(t => t.name !== 'think_longer' && t.name !== 'done');
-
-    const toolSchemas = concreteTools.map(tool => ({
-      type: 'function',
-      function: {
-        name: tool.name,
-        description: getRouterDescription(tool.name),
-        parameters: {
-          type: 'object',
-          properties: Object.fromEntries(
-            tool.parameters.map(p => [p.name, {
-              type: p.type === 'array' ? 'array' : p.type,
-              description: p.description
-            }])
-          ),
-          required: tool.parameters.filter(p => p.required).map(p => p.name)
-        }
-      }
-    }));
-
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'functiongemma',
-        messages: [
-          { role: 'system', content: 'You are a tool router. Select the best function for the query. Always call exactly one function.' },
-          { role: 'user', content: userQuery }
-        ],
-        tools: toolSchemas,
-        stream: false
-      }),
-    });
-
-    if (!response.ok) {
-      console.log('⚠️ FunctionGemma unavailable, falling back to main model');
-      return null;
-    }
-
-    const data = await response.json();
-    const toolCall = data.message?.tool_calls?.[0];
-
-    if (toolCall?.function) {
-      console.log(`⚡ FunctionGemma routed: ${toolCall.function.name} (${data.total_duration ? Math.round(data.total_duration / 1e6) + 'ms' : 'fast'})`);
-      return {
-        name: toolCall.function.name,
-        arguments: toolCall.function.arguments || {}
-      };
-    }
-
-    // No tool selected = likely needs deeper analysis → let main model decide
-    console.log('⚡ FunctionGemma: no concrete tool match → main model decides');
-    return null;
-  } catch (error) {
-    console.log('⚠️ FunctionGemma error:', error);
-    return null;
-  }
-}
-
-/**
- * Enhanced descriptions for better routing (FunctionGemma needs clear hints)
- */
-function getRouterDescription(toolName: string): string {
-  // English descriptions work better with FunctionGemma
-  const descriptions: Record<string, string> = {
-    'search_documents': 'Search documents in database. Use for: find documents, search laws, lookup propositions, list documents',
-    'get_datetime': 'Get current date and time. Use for: what day, what time, current date, today',
-    'web_search': 'External web search. Use for: news, current events, external info, recent updates',
-    'think_longer': 'Deep reasoning and interpretation. Use for: what does X mean, how to interpret, explain implications',
-    'done': 'Signal completion when enough info gathered.'
-  };
-  return descriptions[toolName] || TOOLS.find(t => t.name === toolName)?.description || '';
-}
+// Tool-calling via LLM är DISABLED. Verktyg väljs via direct RAG-strategi.
+// Om gpt-oss i framtiden stöder strukturerade tool_calls kan detta återaktiveras.
+// ═══════════════════════════════════════════════════════════════════════════
 
 /**
  * Format tools for LLM prompt

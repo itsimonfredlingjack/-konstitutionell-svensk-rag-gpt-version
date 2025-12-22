@@ -6,9 +6,8 @@ import { motion } from "framer-motion";
 
 // Define the pipeline steps
 const steps = [
-    { id: "gemma", name: "Gemma-2", role: "Avsikt", status: "complete" },
-    { id: "hermes", name: "Hermes-3", role: "Resoneringsverktyg", status: "complete" },
-    { id: "eurollm", name: "EuroLLM", role: "Sammanhangsfilter", status: "complete" },
+    { id: "chromadb", name: "ChromaDB", role: "Vektordatabas", status: "complete" },
+    { id: "llama-server", name: "llama server", role: "Inferensmotor", status: "complete" },
     { id: "gpt-oss", name: "GPT-OSS", role: "Chattagent", status: "active" }
 ];
 
@@ -55,7 +54,7 @@ export const ConstitutionalLens = () => {
                         <h2 className="text-base font-bold text-cyan-50 tracking-wider text-shadow-md flex items-center gap-2">
                             CONSTITUTIONAL GPT
                             <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 font-mono">
-                                v2.4.0
+                                v0.01
                             </span>
                         </h2>
 
@@ -76,9 +75,14 @@ export const ConstitutionalLens = () => {
                 </div>
 
                 {/* Model Specs Pill */}
-                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-mono text-white/40 shadow-inner backdrop-blur-md group-hover:border-cyan-500/30 transition-colors duration-500">
-                    <Database size={12} className="text-white/20 group-hover:text-cyan-400 transition-colors" />
-                    <span>KBLab/swe-bert</span>
+                <div className="flex flex-col items-end gap-1">
+                    <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-mono text-white/40 shadow-inner backdrop-blur-md group-hover:border-cyan-500/30 transition-colors duration-500">
+                        <Database size={12} className="text-white/20 group-hover:text-cyan-400 transition-colors" />
+                        <span>KBLab/swe-bert</span>
+                    </div>
+                    <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-mono text-white/40 shadow-inner backdrop-blur-md group-hover:border-cyan-500/30 transition-colors duration-500">
+                        <span>Powered by PaddleOCR</span>
+                    </div>
                 </div>
             </div>
 

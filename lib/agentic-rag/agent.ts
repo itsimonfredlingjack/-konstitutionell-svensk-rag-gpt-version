@@ -1,11 +1,13 @@
 /**
  * Agentic RAG Agent
  * ReAct-style agent that reasons about retrieval strategy
+ * 
+ * NOTE: Uses llama-server (port 8080), NOT Ollama
  */
 
 import { TOOLS, getTool, formatToolsForPrompt, ToolResult } from './tools';
 
-const OLLAMA_URL = 'http://localhost:11434';
+const LLAMA_SERVER_URL = 'http://localhost:8080';
 
 export interface AgentState {
   question: string;
@@ -225,7 +227,7 @@ function parseThinkResponse(response: string): {
         if (jsonMatch) {
           try {
             params = JSON.parse(jsonMatch[0]);
-          } catch {}
+          } catch { }
         }
       }
     }
@@ -288,24 +290,24 @@ async function observe(action: AgentAction, result: ToolResult): Promise<AgentOb
 }
 
 /**
- * Call Ollama LLM
+ * Call LLM via llama-server (OpenAI-compatible API)
  */
 async function callLLM(prompt: string): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
 
   try {
-    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-oss:20b',
-        prompt,
-        stream: false,
-        options: {
-          temperature: 0.3,
-          num_predict: 200,
-        },
+        model: 'gpt-oss',
+        messages: [
+          { role: 'system', content: 'Du är en RAG-agent. Följ instruktionerna exakt.' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 200,
       }),
       signal: controller.signal,
     });
@@ -317,7 +319,7 @@ async function callLLM(prompt: string): Promise<string> {
     }
 
     const data = await response.json();
-    return data.response || '';
+    return data.choices?.[0]?.message?.content || '';
   } catch (error) {
     clearTimeout(timeoutId);
     throw error;

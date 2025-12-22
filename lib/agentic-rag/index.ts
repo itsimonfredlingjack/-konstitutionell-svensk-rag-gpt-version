@@ -16,22 +16,22 @@ export { TOOLS };
  * Use for complex queries that benefit from multi-step reasoning
  */
 export function shouldUseAgenticMode(analysis: QueryAnalysis): boolean {
-  // Use agentic mode for:
-  // 1. Complex questions (high confidence threshold means it's not simple)
-  // 2. Comparison questions
-  // 3. Timeline questions
-  // 4. Questions with multiple entities
+  // Use agentic mode for complex questions:
+  // 1. Legal queries with multiple entities
+  // 2. Questions with many expanded terms
+  // Skip for simple queries, smalltalk, or unknown abbreviations
 
-  if (analysis.type === 'JÄMFÖRELSE') return true;
-  if (analysis.type === 'TIDSLINJE') return true;
+  // Don't use agentic mode for non-retrieval queries
+  if (!analysis.shouldRetrieve) return false;
 
   // Multiple entities suggest complexity
   const entityCount =
     analysis.entities.sfsNumbers.length +
-    analysis.entities.authorities.length +
-    analysis.entities.docTypes.length;
+    (analysis.entities.authorities?.length || 0) +
+    analysis.entities.docTypes.length +
+    (analysis.entities.lawNames?.length || 0);
 
-  if (entityCount >= 2) return true;
+  if (entityCount >= 3) return true;
 
   // Long questions with many expanded terms
   if (analysis.expandedTerms.length >= 5) return true;

@@ -18,6 +18,7 @@ import {
   buildAnswerPrompt,
   enforceCitationPolicy,
   validateStructure,
+  validateSFSCitations,
   type SourceDocument,
 } from '../swedish-prompt-profiles';
 
@@ -435,6 +436,28 @@ async function generateFinalAnswer(question: string, steps: AgentStep[]): Promis
     // IMPORTANT: Never expose reasoning_content to users
     let answer = message?.content || '';
 
+    // AUTO-REPAIR: Detektera meta-läckage från Harmony format
+    const metaLeakPatterns = [
+      /^The user (says|asks|wants|is asking)/i,
+      /^Let me (think|analyze|consider|explain)/i,
+      /^I (will|shall|need to|should)/i,
+      /^(First|Now),? (I|let me)/i,
+      /^We (need to|should|will)/i,           // Engelska starter
+      /^To answer/i,                           // "To answer this question..."
+      /^Let's/i,                               // "Let's analyze..."
+      /^<\|?analysis\|?>/i,
+      /^<\|?message\|?>/i,
+    ];
+
+    if (answer && metaLeakPatterns.some(p => p.test(answer.trim()))) {
+      logMetric('meta_leak_detected', { 
+        first_50_chars: answer.substring(0, 50),
+        source: 'generateFinalAnswer'
+      });
+      console.warn('⚠️ Meta-läckage detekterat i content, kör finalizer');
+      answer = ''; // Trigga finalizer nedan
+    }
+
     // Content-empty recovery: run finalizer (no reasoning_content parsing)
     if (!answer) {
       console.warn('⚠️ GPT-OSS: content empty, running finalizer');
@@ -450,6 +473,24 @@ async function generateFinalAnswer(question: string, steps: AgentStep[]): Promis
         source_count: sourceCount 
       });
       console.warn(`⚠️  Removed invalid citations: ${violations.join(', ')}`);
+    }
+    
+    // SFS CITATION VALIDATION: Verify legal references
+    const { valid: validSFS, invalid: invalidSFS } = validateSFSCitations(cleaned, sources);
+    if (invalidSFS.length > 0) {
+      logMetric('invalid_sfs_citations', {
+        invalid: invalidSFS,
+        valid: validSFS,
+      });
+      console.warn(`⚠️  Invalid SFS citations detected: ${invalidSFS.join(', ')}`);
+      // TODO: Strip invalid SFS citations or trigger regeneration
+    }
+    if (validSFS.length > 0) {
+      logMetric('valid_sfs_citations', {
+        count: validSFS.length,
+        citations: validSFS,
+      });
+      console.log(`✅ Valid SFS citations: ${validSFS.join(', ')}`);
     }
 
     // SWEDISH UX HARDENING: Validate structure
@@ -473,9 +514,11 @@ async function generateFinalAnswer(question: string, steps: AgentStep[]): Promis
 
 /**
  * Finalizer: Force a direct Swedish answer when content-empty recovery is needed.
- * Uses a simple prompt that bypasses thinking mode.
+ * Uses a simple prompt that bypasses thinking mode and avoids meta-leakage.
  */
 async function runAgentFinalizer(originalQuestion: string): Promise<string> {
+  logMetric('finalizer_triggered', { reason: 'content_empty_agent_loop' });
+
   try {
     // Use FINALIZER_PROFILE from swedish-prompt-profiles.ts
     const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
@@ -486,9 +529,16 @@ async function runAgentFinalizer(originalQuestion: string): Promise<string> {
         messages: [
           { 
             role: 'system', 
-            content: FINALIZER_PROFILE.systemPrompt
+            content: `Du är en svensk myndighetsjurist.
+
+REGLER:
+• Svara DIREKT på frågan
+• Max 3 meningar på svenska
+• ALDRIG "The user", "Let me", "I will"
+• ALDRIG meta-kommentarer eller analys
+• Om du inte vet: "Det framgår inte av tillgängliga källor."`
           },
-          { role: 'user', content: `Svara kort: ${originalQuestion}` }
+          { role: 'user', content: originalQuestion }
         ],
         temperature: FINALIZER_PROFILE.temperature,
         max_tokens: FINALIZER_PROFILE.max_tokens,
@@ -500,8 +550,23 @@ async function runAgentFinalizer(originalQuestion: string): Promise<string> {
     }
 
     const data = await response.json();
-    logMetric('finalizer_triggered', { reason: 'content_empty_agent_loop' });
-    return data.choices?.[0]?.message?.content || 'Inget svar kunde genereras.';
+    let result = data.choices?.[0]?.message?.content || '';
+    
+    // SISTA SÄKERHETSNÄT: Om finalizer OCKSÅ ger meta, fallback till statiskt svar
+    const finalizerMetaPatterns = [
+      /^The user/i, 
+      /^Let me/i, 
+      /^I will/i,
+      /^We need/i,
+      /^To answer/i,
+      /^Let's/i,
+    ];
+    if (finalizerMetaPatterns.some(p => p.test(result.trim()))) {
+      logMetric('finalizer_also_leaked', { first_30: result.substring(0, 30) });
+      return 'Jag kan inte svara utifrån tillgängliga källor.';
+    }
+    
+    return result || 'Inget svar kunde genereras.';
   } catch {
     return 'Fel vid generering av svar.';
   }
