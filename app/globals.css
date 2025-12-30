@@ -1,18 +1,41 @@
 @import "tailwindcss";
 
 @theme {
-    --color-glass-border: rgba(255, 255, 255, 0.1);
-    --color-glass-surface: rgba(255, 255, 255, 0.03);
-    --color-glass-highlight: rgba(255, 255, 255, 0.08);
+  /* Surfaces - calm glass */
+  --color-surface-primary: rgba(255, 255, 255, 0.03);
+  --color-surface-elevated: rgba(255, 255, 255, 0.06);
+  --color-surface-overlay: rgba(0, 0, 0, 0.8);
 
-    --backdrop-blur-xs: 2px;
-    --backdrop-blur-xl: 40px;
+  /* Accent - sharp neon (cyan) */
+  --color-accent: #00ffff;
+  --color-accent-muted: rgba(0, 255, 255, 0.4);
+  --color-accent-subtle: rgba(0, 255, 255, 0.1);
 
-    --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-    --shadow-glass-inset: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  /* Text */
+  --color-text-primary: #f4f4f5;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #71717a;
+  --color-text-on-accent: #000000; /* Ensuring high contrast on neon accent */
 
-    --font-sans: var(--font-inter), sans-serif;
-    --font-mono: var(--font-roboto-mono), monospace;
+  /* Borders */
+  --color-border-default: rgba(255, 255, 255, 0.1);
+  --color-border-accent: rgba(0, 255, 255, 0.3);
+
+  /* Radius */
+  --radius-sm: 0.5rem;
+  --radius-md: 1rem;
+  --radius-lg: 1.5rem;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --shadow-glow: 0 0 20px rgba(0, 255, 255, 0.3);
+
+  /* Motion */
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --duration-slow: 500ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 :root {
@@ -46,7 +69,6 @@ body {
 
 /* Custom global animations/util classes */
 .glass-panel {
-    @apply bg-glass-surface shadow-glass relative;
+    @apply bg-surface-primary shadow-glass relative border border-border-default;
     backdrop-filter: blur(60px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
 }
