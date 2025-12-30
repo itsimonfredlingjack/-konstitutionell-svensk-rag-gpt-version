@@ -9,11 +9,109 @@ import { SlimRail } from "@/components/SlimRail";
 import { FloatingCapsule } from "@/components/FloatingCapsule";
 import { IntelligenceHud } from "@/components/IntelligenceHud";
 import { GlassTile } from "@/components/GlassTile";
-import { User, Loader2, Sparkles, AlertCircle } from "lucide-react";
+import { User, Loader2, Sparkles, AlertCircle, ChevronDown, ChevronUp, FileText } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import clsx from "clsx";
 import { useChat } from "@/lib/hooks";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SOURCES DISPLAY - Conditional based on mode
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface SourcesDisplayProps {
+    sources: { id: string; title: string; snippet?: string }[];
+    mode?: 'CHAT' | 'ASSIST' | 'EVIDENCE';
+    showCitations?: boolean;
+}
+
+const SourcesDisplay = ({ sources, mode, showCitations }: SourcesDisplayProps) => {
+    const [expanded, setExpanded] = useState(false);
+
+    // CHAT mode: Never show sources (they shouldn't exist anyway)
+    if (mode === 'CHAT') {
+        return null;
+    }
+
+    // EVIDENCE mode: Always show sources
+    if (mode === 'EVIDENCE' || showCitations) {
+        return (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2 w-full ml-auto">
+                {sources.slice(0, 2).map((source) => (
+                    <GlassTile
+                        key={source.id}
+                        title={source.title}
+                        type={source.title.toLowerCase().includes('lag') ? 'law' : 'doc'}
+                        className="border-white/5 bg-white/5 hover:bg-white/10"
+                    >
+                        <div className="line-clamp-2 text-xs opacity-70">
+                            Citerat stöd för ovanstående resonemang.
+                        </div>
+                    </GlassTile>
+                ))}
+                {sources.length > 2 && (
+                    <div className="col-span-2 text-[10px] text-center text-zinc-500 uppercase tracking-widest mt-2">
+                        + {sources.length - 2} ytterligare källor i HUD
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    // ASSIST mode: Show "Visa källor" toggle
+    return (
+        <div className="mt-4 w-full">
+            <button
+                onClick={() => setExpanded(!expanded)}
+                className="flex items-center gap-2 text-xs text-cyan-400/70 hover:text-cyan-400 transition-colors group"
+            >
+                <FileText size={12} className="opacity-60 group-hover:opacity-100" />
+                <span>{expanded ? 'Dölj källor' : `Visa källor (${sources.length})`}</span>
+                {expanded ? (
+                    <ChevronUp size={12} className="opacity-60" />
+                ) : (
+                    <ChevronDown size={12} className="opacity-60" />
+                )}
+            </button>
+
+            <AnimatePresence>
+                {expanded && (
+                    <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                    >
+                        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {sources.slice(0, 4).map((source) => (
+                                <GlassTile
+                                    key={source.id}
+                                    title={source.title}
+                                    type={source.title.toLowerCase().includes('lag') ? 'law' : 'doc'}
+                                    className="border-white/5 bg-white/5 hover:bg-white/10"
+                                >
+                                    <div className="line-clamp-2 text-xs opacity-70">
+                                        {source.snippet || 'Relaterat dokument'}
+                                    </div>
+                                </GlassTile>
+                            ))}
+                        </div>
+                        {sources.length > 4 && (
+                            <div className="text-[10px] text-center text-zinc-500 uppercase tracking-widest mt-2">
+                                + {sources.length - 4} ytterligare källor
+                            </div>
+                        )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STARTUP OVERLAY
+// ═══════════════════════════════════════════════════════════════════════════
 
 const StartupOverlay = () => {
     return (
@@ -38,7 +136,7 @@ const StartupOverlay = () => {
                         "Dekrypterar neurala partitioner...",
                         "Synkroniserar vektorvikter...",
                         "Konfigurerar Kinetic HUD...",
-                        "Kärna online [Gemini v3.0]"
+                        "Kärna online [Gemma 3 12B]"
                     ].map((text, i) => (
                         <motion.div
                             key={i}
@@ -143,7 +241,7 @@ export default function Home() {
                                             <Sparkles className="relative text-cyan-400 w-10 h-10" />
                                         </div>
                                         <div className="space-y-2">
-                                            <h2 className="text-2xl font-light text-white tracking-tight">Constitutional GPT-OSS 20b</h2>
+                                            <h2 className="text-2xl font-light text-white tracking-tight">Constitutional Gemma 3 12B</h2>
                                             <p className="text-sm text-zinc-500 max-w-md mx-auto leading-relaxed">
                                                 Agerar utifrån hundratusentals myndighetsdokument
                                             </p>
@@ -188,27 +286,13 @@ export default function Home() {
                                                 )}
                                             </div>
 
-                                            {/* Attributes / Reasoning Artifacts (Inline) */}
+                                            {/* Sources with conditional display based on mode */}
                                             {msg.role === 'assistant' && !msg.loading && msg.sources && msg.sources.length > 0 && (
-                                                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2 w-full ml-auto">
-                                                    {msg.sources.slice(0, 2).map((source) => (
-                                                        <GlassTile
-                                                            key={source.id}
-                                                            title={source.title}
-                                                            type={source.title.toLowerCase().includes('lag') ? 'law' : 'doc'}
-                                                            className="border-white/5 bg-white/5 hover:bg-white/10"
-                                                        >
-                                                            <div className="line-clamp-2 text-xs opacity-70">
-                                                                Citerat stöd för ovanstående resonemang. Klicka för fulltext.
-                                                            </div>
-                                                        </GlassTile>
-                                                    ))}
-                                                    {msg.sources.length > 2 && (
-                                                        <div className="col-span-2 text-[10px] text-center text-zinc-500 uppercase tracking-widest mt-2">
-                                                            + {msg.sources.length - 2} ytterligare källor i HUD
-                                                        </div>
-                                                    )}
-                                                </div>
+                                                <SourcesDisplay
+                                                    sources={msg.sources}
+                                                    mode={msg.mode}
+                                                    showCitations={msg.showCitations}
+                                                />
                                             )}
                                         </div>
                                     </div>

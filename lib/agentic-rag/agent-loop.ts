@@ -1,11 +1,14 @@
 /**
- * Constitutional AI - Agentic RAG Loop (OPTIMIZED)
+ * Constitutional AI - Agentic RAG Loop (REFACTORED)
  *
- * ReAct pattern: Reason → Act → Observe → Repeat
- * GPT-OSS 20B via llama-server for all LLM calls
- * 
- * NOTE: Hermes removed. Tool-calling disabled until gpt-oss supports structured tool_calls.
- * Using direct RAG: search → context → LLM
+ * TWO-PASS ARCHITECTURE:
+ * - CHAT: GPT-SW3 only (no retrieval)
+ * - ASSIST: Gemma (facts) → GPT-SW3 (style pass)
+ * - EVIDENCE: Gemma only (technical tone, no style pass)
+ *
+ * MODELS:
+ * - Gemma 3 12B (BRAIN): Factual answers, RAG, analysis
+ * - GPT-SW3 6.7B (VOICE): Natural Swedish, chat, style pass
  */
 
 import { TOOLS, getTool, type ToolResult } from './tools';
@@ -13,7 +16,6 @@ import { logMetric } from '../api';
 import {
   ANSWER_PROFILE,
   TOOL_PROFILE,
-  JSON_PROFILE,
   FINALIZER_PROFILE,
   buildAnswerPrompt,
   enforceCitationPolicy,
@@ -21,34 +23,33 @@ import {
   validateSFSCitations,
   type SourceDocument,
 } from '../swedish-prompt-profiles';
+import {
+  orchestrate,
+  type OrchestrationDecision,
+} from '../orchestration/orchestrator';
+import {
+  MODEL_CONFIG,
+  type CanonicalResponse,
+  type ResponseMode,
+  type Citation,
+  createCanonicalResponse,
+} from '../orchestration/response-schema';
+import {
+  generateChatResponse as ollamaChatResponse,
+  generateAssistResponse,
+  generateEvidenceResponse,
+  callWithTools,
+} from '../orchestration/ollama-client';
+import { getChatProfile } from '../orchestration/chat-profiles';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CONFIGURATION - llama-server only (NO Ollama/Hermes)
+// CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
-const LLAMA_SERVER_URL = 'http://localhost:8080';
-const ANSWER_MODEL = 'gpt-oss';   // Answer model via llama-server
-const MAX_ITERATIONS = 3;         // Optimized: 3 is enough for most queries
+const OLLAMA_URL = 'http://localhost:11434';
+const MAX_ITERATIONS = 3;
 
-// Hallucination Jail Warden - verifierar alla svar mot 2M dokument i ChromaDB
+// Hallucination Jail Warden - verifies answers against ChromaDB
 const JAIL_WARDEN_ENABLED = true;
-
-// Tool-calling status (tested 2024-12-21)
-// gpt-oss DOES support structured tool_calls via /v1/chat/completions!
-const TOOL_CALLING_ENABLED = true;  // ENABLED: gpt-oss returns valid tool_calls JSON
-
-// ═══════════════════════════════════════════════════════════════════════════
-// MODELL-KONFIGURATION
-// ═══════════════════════════════════════════════════════════════════════════
-//
-// ANSWER_MODEL = gpt-oss (via llama-server on port 8080)
-//   - BÄSTA generalist-modellen
-//   - Stark på resonemang, analys, juridik
-//   - ANVÄNDS FÖR: Alla LLM-anrop (slutsvar, resonemang)
-//   - Körs med Harmony template via --jinja
-//   - Reasoning control: via --chat-template-kwargs on server (default: low)
-//
-// RADERA INTE GPT-OSS - Den är huvudmodellen för all kommunikation!
-// ═══════════════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -57,7 +58,7 @@ const TOOL_CALLING_ENABLED = true;  // ENABLED: gpt-oss returns valid tool_calls
 interface AgentThought {
   reasoning: string;
   action: string;
-  action_input: Record<string, any>;
+  action_input: Record<string, unknown>;
 }
 
 interface AgentStep {
@@ -65,57 +66,94 @@ interface AgentStep {
   observation: ToolResult;
 }
 
-interface AgentResponse {
+export interface AgentResponse extends CanonicalResponse {
   question: string;
   steps: AgentStep[];
-  final_answer: string;
-  confidence: number;
-  sources: string[];
   iterations: number;
   total_time_ms: number;
   jail_warden_status: 'VERIFIED' | 'REGENERATED' | 'ERROR' | 'SKIPPED';
+  showCitations: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// AGENT LOOP (OPTIMIZED)
+// MAIN AGENT LOOP
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function runAgent(question: string): Promise<AgentResponse> {
   const startTime = Date.now();
   const steps: AgentStep[] = [];
   const sources: string[] = [];
-  const usedQueries = new Set<string>();  // Track queries to avoid duplicates
+  const usedQueries = new Set<string>();
   let totalDocsFound = 0;
 
-  console.log('\n' + '═'.repeat(60));
-  console.log('🤖 AGENT STARTAR');
-  console.log('═'.repeat(60));
-  console.log(`📝 Fråga: "${question}"\n`);
+  // ════════════════════════════════════════════════════════════════════════
+  // ORCHESTRATION: Determine mode and retrieval strategy
+  // ════════════════════════════════════════════════════════════════════════
+  const decision = orchestrate(question);
 
+  console.log('\n' + '═'.repeat(60));
+  console.log(`🤖 AGENT STARTAR [Mode: ${decision.mode}]`);
+  console.log('═'.repeat(60));
+  console.log(`📝 Fråga: "${question}"`);
+  console.log(`🎭 Retrieve: ${decision.retrieve}, Citations: ${decision.showCitations}`);
+  console.log(`🧠 Brain: ${MODEL_CONFIG.BRAIN} | Voice: ${MODEL_CONFIG.VOICE}\n`);
+
+  // ════════════════════════════════════════════════════════════════════════
+  // CHAT MODE: GPT-SW3 only, no retrieval
+  // ════════════════════════════════════════════════════════════════════════
+  if (!decision.retrieve) {
+    const chatProfile = getChatProfile(decision.queryType);
+
+    console.log(`💬 CHAT MODE: Using ${MODEL_CONFIG.VOICE} (${chatProfile.name})`);
+
+    const chatResponse = await ollamaChatResponse(
+      question,
+      chatProfile.systemPrompt,
+      {
+        temperature: chatProfile.temperature,
+        max_tokens: chatProfile.max_tokens,
+      }
+    );
+
+    const totalTime = Date.now() - startTime;
+
+    console.log('\n' + '═'.repeat(60));
+    console.log('📋 SLUTSVAR (CHAT MODE)');
+    console.log('═'.repeat(60));
+    console.log(chatResponse.answer);
+    console.log(`\n⏱️  Total tid: ${totalTime}ms | Mode: CHAT | Model: ${MODEL_CONFIG.VOICE}`);
+
+    return {
+      ...chatResponse,
+      question,
+      steps: [],
+      iterations: 0,
+      total_time_ms: totalTime,
+      jail_warden_status: 'SKIPPED',
+      showCitations: false,
+    };
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // ASSIST/EVIDENCE MODE: Retrieval-based with two-pass
+  // ════════════════════════════════════════════════════════════════════════
   let iteration = 0;
   let isDone = false;
-  let finalAnswer = '';
-
-  // NOTE: FunctionGemma routing DISABLED (used Ollama)
-  // Using direct RAG strategy instead
-
-  // State for smart decisions
   let lastObservation = '';
 
+  // Retrieval loop
   while (!isDone && iteration < MAX_ITERATIONS) {
     iteration++;
     console.log(`\n🔄 Iteration ${iteration}/${MAX_ITERATIONS}`);
     console.log('─'.repeat(40));
 
     try {
-      // Get agent's next thought with context about what we've found
       const thought = await getAgentThought(question, lastObservation, totalDocsFound, iteration);
       console.log(`💭 Reasoning: ${thought.reasoning.substring(0, 80)}...`);
       console.log(`🎯 Action: ${thought.action}`);
 
       if (thought.action === 'done') {
         isDone = true;
-        finalAnswer = thought.action_input.summary || 'Analys klar.';
         console.log('✅ Agent är klar!');
         break;
       }
@@ -139,52 +177,59 @@ export async function runAgent(question: string): Promise<AgentResponse> {
       console.log(`🔧 Kör ${thought.action}...`);
       const observation = await tool.execute(thought.action_input);
 
-      // Track sources and count from search results
+      // Track sources from search results
       if (thought.action === 'search_documents' && observation.success && observation.data) {
         const docs = observation.data;
         totalDocsFound += docs.length;
-        docs.forEach((doc: any) => {
+        docs.forEach((doc: { title?: string }) => {
           if (doc.title) sources.push(doc.title);
         });
 
-        // Auto-complete if we have enough high-quality results
+        // Auto-complete if we have enough results
         if (totalDocsFound >= 10 && iteration >= 2) {
           console.log(`📚 ${totalDocsFound} dokument hittade, tillräckligt!`);
           isDone = true;
         }
       }
 
-      // Record step
       steps.push({ thought, observation });
-
-      // Compact observation for next iteration (limit context bloat)
       lastObservation = formatObservation(observation.data);
-
       console.log(`📊 Observation: ${observation.success ? 'Lyckades' : 'Misslyckades'} (${totalDocsFound} docs total)`);
 
     } catch (error) {
       console.error(`❌ Fel i iteration ${iteration}:`, error);
-      // Don't add error to context, just continue
     }
   }
 
-  // Generate final answer
-  if (!finalAnswer || finalAnswer === 'Analys klar.') {
-    finalAnswer = await generateFinalAnswer(question, steps);
+  // ════════════════════════════════════════════════════════════════════════
+  // GENERATE RESPONSE: Two-pass for ASSIST, single pass for EVIDENCE
+  // ════════════════════════════════════════════════════════════════════════
+  const collectedSources = collectSources(steps);
+
+  let response: CanonicalResponse;
+
+  if (decision.mode === 'EVIDENCE') {
+    console.log(`\n🔬 EVIDENCE MODE: Using ${MODEL_CONFIG.BRAIN} only (technical tone)`);
+    response = await generateEvidenceResponse(question, collectedSources, ANSWER_PROFILE.systemPrompt);
+  } else {
+    console.log(`\n✨ ASSIST MODE: Two-pass (${MODEL_CONFIG.BRAIN} → ${MODEL_CONFIG.VOICE})`);
+    response = await generateAssistResponse(question, collectedSources, ANSWER_PROFILE.systemPrompt, decision.mode);
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // JAIL WARDEN VERIFICATION - Verifiera svar mot ChromaDB
+  // JAIL WARDEN VERIFICATION
   // ════════════════════════════════════════════════════════════════════════
   let jailWardenStatus: 'VERIFIED' | 'REGENERATED' | 'ERROR' | 'SKIPPED' = 'SKIPPED';
 
-  if (JAIL_WARDEN_ENABLED) {
-    const jailWardenResult = await verifyWithJailWarden(question, finalAnswer);
+  if (JAIL_WARDEN_ENABLED && response.answer) {
+    const jailWardenResult = await verifyWithJailWarden(question, response.answer);
     jailWardenStatus = jailWardenResult.status;
 
-    // Använd det verifierade/regenererade svaret
-    if (jailWardenResult.answer) {
-      finalAnswer = jailWardenResult.answer;
+    if (jailWardenResult.answer && jailWardenResult.status === 'REGENERATED') {
+      response = {
+        ...response,
+        answer: jailWardenResult.answer,
+      };
     }
   }
 
@@ -193,25 +238,51 @@ export async function runAgent(question: string): Promise<AgentResponse> {
   console.log('\n' + '═'.repeat(60));
   console.log('📋 SLUTSVAR');
   console.log('═'.repeat(60));
-  console.log(finalAnswer);
+  console.log(response.answer);
   console.log(`\n⏱️  Total tid: ${totalTime}ms | Iterationer: ${iteration}`);
   console.log(`🚨 Jail Warden: ${jailWardenStatus}`);
 
   return {
+    ...response,
     question,
     steps,
-    final_answer: finalAnswer,
-    confidence: calculateConfidence(steps, totalDocsFound),
-    sources: [...new Set(sources)].slice(0, 10),
     iterations: iteration,
     total_time_ms: totalTime,
     jail_warden_status: jailWardenStatus,
+    showCitations: decision.showCitations,
+    debug: {
+      ...response.debug,
+      retrieved: collectedSources.length,
+      jail_warden: jailWardenStatus,
+      iterations: iteration,
+    },
   };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// OPTIMIZED HELPER FUNCTIONS
+// HELPER FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════
+
+function collectSources(steps: AgentStep[]): SourceDocument[] {
+  const sources: SourceDocument[] = [];
+
+  for (const step of steps) {
+    if (Array.isArray(step.observation.data)) {
+      step.observation.data.forEach((doc: Record<string, unknown>, idx: number) => {
+        if (sources.length < 5) {
+          sources.push({
+            id: (doc.id as string) || `doc-${idx}`,
+            title: (doc.title as string) || 'Okänt dokument',
+            content: (doc.content as string) || (doc.preview as string) || '',
+            sfs: doc.sfs as string | undefined,
+          });
+        }
+      });
+    }
+  }
+
+  return sources;
+}
 
 async function getAgentThought(
   question: string,
@@ -219,8 +290,6 @@ async function getAgentThought(
   docsFound: number,
   iteration: number
 ): Promise<AgentThought> {
-
-  // Extract key subject from question for better search fallback
   const keySubject = extractKeySubject(question);
 
   // Early exit if we have enough docs
@@ -228,26 +297,7 @@ async function getAgentThought(
     return { reasoning: 'Har tillräckligt med dokument', action: 'done', action_input: {} };
   }
 
-  if (!TOOL_CALLING_ENABLED) {
-    // Direct RAG fallback
-    if (iteration === 1) {
-      return {
-        reasoning: 'Söker dokument om ämnet',
-        action: 'search_documents',
-        action_input: { query: keySubject },
-      };
-    }
-    if (docsFound > 0) {
-      return { reasoning: 'Har hittat dokument, avslutar', action: 'done', action_input: {} };
-    }
-    return {
-      reasoning: 'Försöker bredare sökning',
-      action: 'search_documents',
-      action_input: { query: question.split(' ').slice(0, 3).join(' ') },
-    };
-  }
-
-  // TOOL-CALLING ENABLED: Use gpt-oss via llama-server
+  // Tool definition for search
   const tools = [
     {
       type: 'function',
@@ -257,9 +307,9 @@ async function getAgentThought(
         parameters: {
           type: 'object',
           properties: { query: { type: 'string', description: 'Sökfrågan' } },
-          required: ['query']
-        }
-      }
+          required: ['query'],
+        },
+      },
     },
     {
       type: 'function',
@@ -268,22 +318,18 @@ async function getAgentThought(
         description: 'Signalerar att sökningen är klar',
         parameters: {
           type: 'object',
-          properties: { summary: { type: 'string', description: 'Sammanfattning' } }
-        }
-      }
-    }
+          properties: { summary: { type: 'string', description: 'Sammanfattning' } },
+        },
+      },
+    },
   ];
 
-  // Use TOOL_PROFILE from swedish-prompt-profiles.ts
   const systemPrompt = `${TOOL_PROFILE.systemPrompt}
 ${docsFound >= 3 ? 'Du har tillräckligt med dokument - använd done.' : 'Sök efter relevanta dokument.'}`;
 
-  const messages = [
-    {
-      role: 'system',
-      content: systemPrompt
-    },
-    { role: 'user', content: question }
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: question },
   ];
 
   if (lastObservation) {
@@ -291,30 +337,18 @@ ${docsFound >= 3 ? 'Du har tillräckligt med dokument - använd done.' : 'Sök e
   }
 
   try {
-    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: ANSWER_MODEL,
-        messages,
-        tools,
-        temperature: TOOL_PROFILE.temperature,
-        max_tokens: TOOL_PROFILE.max_tokens,
-      }),
+    const response = await callWithTools(messages, tools, {
+      temperature: TOOL_PROFILE.temperature,
+      max_tokens: TOOL_PROFILE.max_tokens,
     });
 
-    if (!response.ok) {
-      throw new Error(`llama-server error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    const toolCall = response.choices?.[0]?.message?.tool_calls?.[0];
 
     if (toolCall?.function) {
       try {
         const args = JSON.parse(toolCall.function.arguments || '{}');
         return {
-          reasoning: `Tool: ${toolCall.function.name}`,  // Never expose reasoning_content
+          reasoning: `Tool: ${toolCall.function.name}`,
           action: toolCall.function.name,
           action_input: args,
         };
@@ -323,9 +357,8 @@ ${docsFound >= 3 ? 'Du har tillräckligt med dokument - använd done.' : 'Sök e
           function: 'decide',
           tool_name: toolCall.function.name,
           raw_args: toolCall.function.arguments,
-          error: String(parseError)
+          error: String(parseError),
         });
-        // Fallback with empty args rather than crashing
         return {
           reasoning: `Tool: ${toolCall.function.name} (args parse failed)`,
           action: toolCall.function.name,
@@ -334,7 +367,7 @@ ${docsFound >= 3 ? 'Du har tillräckligt med dokument - använd done.' : 'Sök e
       }
     }
 
-    // No tool call - default to done if we have docs
+    // No tool call - default behavior
     if (docsFound > 0) {
       return { reasoning: 'Avslutar sökning', action: 'done', action_input: {} };
     }
@@ -343,10 +376,8 @@ ${docsFound >= 3 ? 'Du har tillräckligt med dokument - använd done.' : 'Sök e
       action: 'search_documents',
       action_input: { query: keySubject },
     };
-
   } catch (error) {
     console.error('Tool-calling error:', error);
-    // Fallback to direct RAG
     return {
       reasoning: 'Fel vid tool-calling, fallback',
       action: 'search_documents',
@@ -355,22 +386,24 @@ ${docsFound >= 3 ? 'Du har tillräckligt med dokument - använd done.' : 'Sök e
   }
 }
 
-// Extract the key subject from a question (longest meaningful word)
 function extractKeySubject(question: string): string {
-  const stopWords = ['vilka', 'vilken', 'vilket', 'vad', 'hur', 'finns', 'finnas', 'gäller', 'innebär', 'lagar', 'regler', 'reglerar', 'reglering', 'sverige', 'svensk', 'svenska', 'och', 'att', 'som', 'för', 'med', 'den', 'det', 'är', 'var', 'ska', 'kan', 'till', 'från'];
+  const stopWords = [
+    'vilka', 'vilken', 'vilket', 'vad', 'hur', 'finns', 'finnas', 'gäller',
+    'innebär', 'lagar', 'regler', 'reglerar', 'reglering', 'sverige', 'svensk',
+    'svenska', 'och', 'att', 'som', 'för', 'med', 'den', 'det', 'är', 'var',
+    'ska', 'kan', 'till', 'från',
+  ];
   const words = question.toLowerCase().split(/\s+/).filter(w =>
     w.length > 4 && !stopWords.includes(w)
   );
-  // Return longest word (most likely the subject)
   return words.sort((a, b) => b.length - a.length)[0] || question.split(' ').pop() || question;
 }
 
-function formatObservation(data: any): string {
+function formatObservation(data: unknown): string {
   if (!data) return '';
 
   if (Array.isArray(data)) {
-    // Compact format: just titles
-    return data.slice(0, 5).map((d: any) =>
+    return data.slice(0, 5).map((d: Record<string, unknown>) =>
       `• ${d.title || d.id}`
     ).join('\n');
   }
@@ -378,512 +411,163 @@ function formatObservation(data: any): string {
   return JSON.stringify(data).substring(0, 300);
 }
 
-async function generateFinalAnswer(question: string, steps: AgentStep[]): Promise<string> {
-  // Collect document context and build sources
-  const sources: SourceDocument[] = [];
+// ═══════════════════════════════════════════════════════════════════════════
+// JAIL WARDEN - Hallucination Detection
+// ═══════════════════════════════════════════════════════════════════════════
 
-  for (const step of steps) {
-    if (Array.isArray(step.observation.data)) {
-      step.observation.data.forEach((doc: any, idx: number) => {
-        if (sources.length < 5) {  // Max 5 sources
-          sources.push({
-            id: doc.id || `doc-${idx}`,
-            title: doc.title || 'Okänt dokument',
-            content: doc.content || doc.preview || '',
-            sfs: doc.sfs,  // SFS number if available
-          });
-        }
-      });
-    }
-  }
-
-  console.log(`\n🎯 Genererar slutsvar med ${ANSWER_MODEL} (${sources.length} källor)...`);
-
-  // Build structured prompt with source citations
-  const { userPrompt, sourceCount } = buildAnswerPrompt(question, sources);
-
-  try {
-    // Use ANSWER_PROFILE from swedish-prompt-profiles.ts
-    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: ANSWER_MODEL,
-        messages: [
-          {
-            role: 'system',
-            content: ANSWER_PROFILE.systemPrompt
-          },
-          {
-            role: 'user',
-            content: userPrompt
-          }
-        ],
-        temperature: ANSWER_PROFILE.temperature,
-        max_tokens: ANSWER_PROFILE.max_tokens,
-      }),
-    });
-
-    if (!response.ok) {
-      console.error(`llama-server error: ${response.status}`);
-      return 'Kunde inte generera slutsvar.';
-    }
-
-    const data = await response.json();
-    const message = data.choices?.[0]?.message;
-
-    // Harmony template: content = final answer
-    // IMPORTANT: Never expose reasoning_content to users
-    let answer = message?.content || '';
-
-    // AUTO-REPAIR: Detektera meta-läckage från Harmony format
-    const metaLeakPatterns = [
-      /^The user (says|asks|wants|is asking)/i,
-      /^Let me (think|analyze|consider|explain)/i,
-      /^I (will|shall|need to|should)/i,
-      /^(First|Now),? (I|let me)/i,
-      /^We (need to|should|will)/i,           // Engelska starter
-      /^To answer/i,                           // "To answer this question..."
-      /^Let's/i,                               // "Let's analyze..."
-      /^<\|?analysis\|?>/i,
-      /^<\|?message\|?>/i,
-    ];
-
-    if (answer && metaLeakPatterns.some(p => p.test(answer.trim()))) {
-      logMetric('meta_leak_detected', { 
-        first_50_chars: answer.substring(0, 50),
-        source: 'generateFinalAnswer'
-      });
-      console.warn('⚠️ Meta-läckage detekterat i content, kör finalizer');
-      answer = ''; // Trigga finalizer nedan
-    }
-
-    // Content-empty recovery: run finalizer (no reasoning_content parsing)
-    if (!answer) {
-      console.warn('⚠️ GPT-OSS: content empty, running finalizer');
-      answer = await runAgentFinalizer(question);
-      return answer;
-    }
-
-    // SWEDISH UX HARDENING: Enforce citation policy
-    const { cleaned, violations } = enforceCitationPolicy(answer, sourceCount);
-    if (violations.length > 0) {
-      logMetric('citation_violations_removed', { 
-        violations: violations.join(', '),
-        source_count: sourceCount 
-      });
-      console.warn(`⚠️  Removed invalid citations: ${violations.join(', ')}`);
-    }
-    
-    // SFS CITATION VALIDATION: Verify legal references
-    const { valid: validSFS, invalid: invalidSFS } = validateSFSCitations(cleaned, sources);
-    if (invalidSFS.length > 0) {
-      logMetric('invalid_sfs_citations', {
-        invalid: invalidSFS,
-        valid: validSFS,
-      });
-      console.warn(`⚠️  Invalid SFS citations detected: ${invalidSFS.join(', ')}`);
-      // TODO: Strip invalid SFS citations or trigger regeneration
-    }
-    if (validSFS.length > 0) {
-      logMetric('valid_sfs_citations', {
-        count: validSFS.length,
-        citations: validSFS,
-      });
-      console.log(`✅ Valid SFS citations: ${validSFS.join(', ')}`);
-    }
-
-    // SWEDISH UX HARDENING: Validate structure
-    const structureViolations = validateStructure(cleaned, sourceCount);
-    if (structureViolations.length > 0) {
-      logMetric('structure_violations_detected', {
-        violations: structureViolations.map(v => v.type),
-        line_count: cleaned.split('\n').length,
-      });
-      console.warn(`⚠️  Structure violations: ${structureViolations.map(v => v.type).join(', ')}`);
-      // TODO: Implement style finalizer if violations are severe
-    }
-
-    return cleaned || 'Inget svar kunde genereras.';
-
-  } catch (error) {
-    console.error('Answer generation error:', error);
-    return `Fel: ${error}`;
-  }
+interface JailWardenResult {
+  status: 'VERIFIED' | 'REGENERATED' | 'ERROR' | 'SKIPPED';
+  answer?: string;
+  hallucinations?: string[];
 }
 
-/**
- * Finalizer: Force a direct Swedish answer when content-empty recovery is needed.
- * Uses a simple prompt that bypasses thinking mode and avoids meta-leakage.
- */
-async function runAgentFinalizer(originalQuestion: string): Promise<string> {
-  logMetric('finalizer_triggered', { reason: 'content_empty_agent_loop' });
+async function verifyWithJailWarden(question: string, answer: string): Promise<JailWardenResult> {
+  console.log('🚨 Jail Warden: Verifierar svar...');
 
   try {
-    // Use FINALIZER_PROFILE from swedish-prompt-profiles.ts
-    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: ANSWER_MODEL,
-        messages: [
-          { 
-            role: 'system', 
-            content: `Du är en svensk myndighetsjurist.
+    // Extract claims from the answer
+    const claims = await extractClaims(answer);
 
-REGLER:
-• Svara DIREKT på frågan
-• Max 3 meningar på svenska
-• ALDRIG "The user", "Let me", "I will"
-• ALDRIG meta-kommentarer eller analys
-• Om du inte vet: "Det framgår inte av tillgängliga källor."`
-          },
-          { role: 'user', content: originalQuestion }
-        ],
-        temperature: FINALIZER_PROFILE.temperature,
-        max_tokens: FINALIZER_PROFILE.max_tokens,
-      }),
-    });
-
-    if (!response.ok) {
-      return 'Kunde inte generera svar.';
+    if (claims.length === 0) {
+      console.log('🚨 Jail Warden: Inga verifierbara påståenden');
+      return { status: 'VERIFIED' };
     }
 
-    const data = await response.json();
-    let result = data.choices?.[0]?.message?.content || '';
-    
-    // SISTA SÄKERHETSNÄT: Om finalizer OCKSÅ ger meta, fallback till statiskt svar
-    const finalizerMetaPatterns = [
-      /^The user/i, 
-      /^Let me/i, 
-      /^I will/i,
-      /^We need/i,
-      /^To answer/i,
-      /^Let's/i,
-    ];
-    if (finalizerMetaPatterns.some(p => p.test(result.trim()))) {
-      logMetric('finalizer_also_leaked', { first_30: result.substring(0, 30) });
-      return 'Jag kan inte svara utifrån tillgängliga källor.';
-    }
-    
-    return result || 'Inget svar kunde genereras.';
-  } catch {
-    return 'Fel vid generering av svar.';
-  }
-}
+    // Verify each claim against ChromaDB
+    const hallucinations: string[] = [];
 
-// Format GPT-OSS thinking into a proper Swedish answer (DEPRECATED - kept for reference)
-function formatGptOssAnswer(thinking: string, question: string): string {
-  // Find actual law names (not "Allemansrätten" itself which is the subject)
-  const lawMatches: string[] = [];
-
-  // Swedish law patterns
-  const patterns = [
-    { regex: /Miljöbalken/gi, name: 'Miljöbalken' },
-    { regex: /Skogsvårdslagen/gi, name: 'Skogsvårdslagen' },
-    { regex: /Naturvårdslagen/gi, name: 'Naturvårdslagen' },
-    { regex: /Jordabalken/gi, name: 'Jordabalken' },
-    { regex: /Regeringsformen/gi, name: 'Regeringsformen' },
-    { regex: /Environmental Code/gi, name: 'Miljöbalken' },
-    { regex: /Forest Act/gi, name: 'Skogsvårdslagen' },
-  ];
-
-  for (const { regex, name } of patterns) {
-    if (regex.test(thinking)) {
-      lawMatches.push(name);
-    }
-  }
-
-  // Find SFS numbers
-  const sfsNumbers = thinking.match(/\d{4}:\d+/g) || [];
-  const uniqueSfs = [...new Set(sfsNumbers)].slice(0, 3);
-
-  // Build answer
-  const uniqueLaws = [...new Set(lawMatches)];
-
-  if (uniqueLaws.length > 0 || uniqueSfs.length > 0) {
-    let answer = 'Allemansrätten regleras huvudsakligen av ';
-
-    if (uniqueLaws.length > 0) {
-      answer += uniqueLaws.join(', ');
-    }
-
-    if (uniqueSfs.length > 0) {
-      if (uniqueLaws.length > 0) {
-        answer += ` (SFS ${uniqueSfs.join(', ')})`;
-      } else {
-        answer += `SFS ${uniqueSfs.join(', SFS ')}`;
+    for (const claim of claims) {
+      const isVerified = await verifyClaim(claim);
+      if (!isVerified) {
+        hallucinations.push(claim);
       }
     }
 
-    answer += '.';
-    return answer;
+    if (hallucinations.length === 0) {
+      console.log('🚨 Jail Warden: ✅ VERIFIED');
+      return { status: 'VERIFIED' };
+    }
+
+    console.log(`🚨 Jail Warden: ⚠️ ${hallucinations.length} hallucinations found`);
+    logMetric('jail_warden_hallucinations', { count: hallucinations.length, claims: hallucinations });
+
+    // Regenerate answer without hallucinated claims
+    const regeneratedAnswer = await regenerateAnswer(question, hallucinations, answer);
+
+    return {
+      status: 'REGENERATED',
+      answer: regeneratedAnswer,
+      hallucinations,
+    };
+  } catch (error) {
+    console.error('🚨 Jail Warden error:', error);
+    return { status: 'ERROR' };
   }
-
-  // Fallback: return summary from thinking
-  return 'Allemansrätten regleras av Miljöbalken och Naturvårdsverkets föreskrifter.';
-}
-
-// REMOVED: extractSwedishAnswer - Never parse reasoning_content for user display
-// Use runAgentFinalizer() instead for content-empty recovery
-
-// ═══════════════════════════════════════════════════════════════════════════
-// HALLUCINATION JAIL WARDEN - Native TypeScript implementation
-// ═══════════════════════════════════════════════════════════════════════════
-// Verifierar GPT-OSS svar mot ChromaDB för att fånga hallucinationer.
-// 1. Extraherar claims med GPT-OSS
-// 2. Verifierar varje claim mot ChromaDB (535K dokument)
-// 3. Om hallucination → regenererar med GPT-OSS
-// ═══════════════════════════════════════════════════════════════════════════
-
-const CHROMADB_SEARCH_URL = 'http://localhost:8000/api/constitutional/search';
-const SIMILARITY_THRESHOLD = 0.65;  // Minimum score för att verifiera claim
-
-interface JailWardenResponse {
-  status: 'VERIFIED' | 'REGENERATED' | 'ERROR';
-  answer: string;
-  verified_claims?: number;
-  hallucinations?: number;
-  original_hallucinations?: string[];
-  regeneration_reason?: string;
 }
 
 async function extractClaims(answer: string): Promise<string[]> {
-  const maxRetries = 2;
-  
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      // Use JSON_PROFILE from swedish-prompt-profiles.ts
-      const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: ANSWER_MODEL,
-          messages: [
-            {
-              role: 'system',
-              content: JSON_PROFILE.systemPrompt
-            },
-            {
-              role: 'user',
-              content: `TEXT ATT ANALYSERA:\n${answer}`
-            }
-          ],
-          temperature: JSON_PROFILE.temperature,
-          max_tokens: JSON_PROFILE.max_tokens,
-          response_format: { type: "json_object" }  // Primary enforcement
-        }),
-      });
-
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || '{}';
-
-      // Parse JSON - handle multiple formats
-      let parsed: any;
-      
-      try {
-        parsed = JSON.parse(content);
-      } catch {
-        // Try extracting JSON from text
-        const match = content.match(/\{[\s\S]*?\}|\[[\s\S]*?\]/);
-        if (match) {
-          parsed = JSON.parse(match[0]);
-        } else {
-          throw new Error('No valid JSON found in response');
-        }
-      }
-      
-      // Extract claims array from various formats
-      let claims: string[] = [];
-      
-      if (Array.isArray(parsed)) {
-        // Format: ["claim1", "claim2"]
-        claims = parsed;
-      } else if (parsed.claims && Array.isArray(parsed.claims)) {
-        // Format: {"claims": ["claim1", "claim2"]} (JSON_PROFILE format)
-        claims = parsed.claims;
-      } else if (typeof parsed === 'object') {
-        // Format: {"påstående 1": "...", "påstående 2": "..."}
-        claims = Object.values(parsed).filter(v => typeof v === 'string');
-      }
-      
-      const filtered = claims.filter((c: string) => c && c.length > 10);
-      
-      if (attempt > 0) {
-        logMetric('json_parse_retry_success', { 
-          function: 'extractClaims', 
-          attempt: attempt + 1,
-          claims_count: filtered.length 
-        });
-      }
-      
-      return filtered;
-      
-    } catch (error) {
-      if (attempt < maxRetries) {
-        logMetric('json_parse_retry', { 
-          function: 'extractClaims', 
-          attempt: attempt + 1,
-          error: String(error)
-        });
-        // Wait before retry (exponential backoff)
-        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 100));
-        continue;
-      } else {
-        logMetric('json_parse_failed', { 
-          function: 'extractClaims',
-          total_attempts: attempt + 1,
-          error: String(error)
-        });
-        return [];
-      }
-    }
-  }
-  
-  return [];
-}
-
-async function verifyClaim(claim: string): Promise<{ verified: boolean; score: number }> {
   try {
-    const response = await fetch(CHROMADB_SEARCH_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: claim, limit: 3, page: 1, sort: 'relevance' }),
-    });
-
-    if (!response.ok) return { verified: false, score: 0 };
-
-    const data = await response.json();
-    const bestScore = data.results?.[0]?.score || 0;
-
-    return { verified: bestScore >= SIMILARITY_THRESHOLD, score: bestScore };
-  } catch {
-    return { verified: false, score: 0 };
-  }
-}
-
-async function regenerateAnswer(question: string, hallucinations: string[]): Promise<string> {
-  try {
-    // Use llama-server /v1/chat/completions
-    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: ANSWER_MODEL,
+        model: MODEL_CONFIG.BRAIN,
         messages: [
           {
             role: 'system',
-            content: 'Du är en juridisk expert. Skriv ENDAST information du är säker på. Om du inte vet, säg det.'
+            content: `Extrahera faktapåståenden från texten.
+Returnera JSON: { "claims": ["påstående 1", "påstående 2"] }
+Fokusera på: SFS-nummer, årtal, myndigheter, lagtext.
+Minst 10 tecken per påstående.`,
           },
-          {
-            role: 'user',
-            content: `Användaren frågade: ${question}
-
-Ditt tidigare svar innehöll FELAKTIGA påståenden som inte kunde verifieras:
-${hallucinations.map(h => `- ${h}`).join('\n')}
-
-Skriv ett NYTT svar som ENDAST innehåller korrekt information. Svara på svenska.`
-          }
+          { role: 'user', content: answer },
         ],
-        temperature: 0.3,
-        max_tokens: 500,
+        stream: false,
+        format: {
+          type: 'object',
+          properties: {
+            claims: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['claims'],
+        },
       }),
     });
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || 'Kunde inte generera nytt svar.';
+    const content = data.message?.content || '{}';
+    const parsed = JSON.parse(content);
+    return parsed.claims || [];
   } catch {
-    return 'Fel vid regenerering.';
+    return [];
   }
 }
 
-async function verifyWithJailWarden(
-  question: string,
-  answer: string
-): Promise<JailWardenResponse> {
-  if (!JAIL_WARDEN_ENABLED) {
-    return { status: 'VERIFIED', answer };
-  }
+async function verifyClaim(claim: string): Promise<boolean> {
+  try {
+    // Search ChromaDB for the claim
+    const searchTool = getTool('search_documents');
+    if (!searchTool) return true;  // Skip verification if tool unavailable
 
-  console.log('\n🚨 JAIL WARDEN - Verifierar svar mot ChromaDB...');
+    const result = await searchTool.execute({ query: claim, limit: 3 });
+
+    if (!result.success || !result.data?.length) {
+      return false;
+    }
+
+    // Check similarity score (threshold: 0.65)
+    const topScore = result.data[0]?.similarity_score || 0;
+    return topScore >= 0.65;
+  } catch {
+    return true;  // Skip verification on error
+  }
+}
+
+async function regenerateAnswer(question: string, hallucinations: string[], originalAnswer: string): Promise<string> {
+  const hallucinationList = hallucinations.map(h => `• ${h}`).join('\n');
 
   try {
-    // 1. Extract claims
-    const claims = await extractClaims(answer);
-    console.log(`   📋 ${claims.length} påståenden extraherade`);
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MODEL_CONFIG.BRAIN,
+        messages: [
+          {
+            role: 'system',
+            content: `Skriv om svaret utan dessa ej verifierade påståenden:
+${hallucinationList}
 
-    if (claims.length === 0) {
-      console.log(`   ✅ Inga verifierbara claims - godkänt`);
-      return { status: 'VERIFIED', answer, verified_claims: 0 };
-    }
+Behåll korrekt information. Lägg till "Det framgår inte av källorna" för borttagna påståenden.`,
+          },
+          { role: 'user', content: `Fråga: ${question}\n\nUrsprungligt svar:\n${originalAnswer}` },
+        ],
+        stream: false,
+        options: { temperature: 0.3, num_predict: 400 },
+      }),
+    });
 
-    // 2. Verify each claim against ChromaDB
-    const hallucinations: string[] = [];
-    let verifiedCount = 0;
-
-    for (const claim of claims) {
-      const result = await verifyClaim(claim);
-      if (result.verified) {
-        verifiedCount++;
-        console.log(`   ✅ "${claim.substring(0, 40)}..." (${(result.score * 100).toFixed(0)}%)`);
-      } else {
-        hallucinations.push(claim);
-        console.log(`   ❌ "${claim.substring(0, 40)}..." (${(result.score * 100).toFixed(0)}%)`);
-      }
-    }
-
-    // 3. If hallucinations found, regenerate
-    if (hallucinations.length > 0) {
-      console.log(`\n🔄 ${hallucinations.length} hallucinationer! Regenererar...`);
-      const newAnswer = await regenerateAnswer(question, hallucinations);
-
-      return {
-        status: 'REGENERATED',
-        answer: newAnswer,
-        verified_claims: verifiedCount,
-        hallucinations: hallucinations.length,
-        original_hallucinations: hallucinations,
-        regeneration_reason: 'Overifierade påståenden upptäcktes',
-      };
-    }
-
-    console.log(`   ✅ VERIFIED - Alla ${verifiedCount} påståenden bekräftade!`);
-    return { status: 'VERIFIED', answer, verified_claims: verifiedCount };
-
-  } catch (error) {
-    console.log(`⚠️ Jail Warden-fel: ${error}`);
-    return { status: 'ERROR', answer };
+    const data = await response.json();
+    return data.message?.content || originalAnswer;
+  } catch {
+    return originalAnswer;
   }
 }
 
-function calculateConfidence(steps: AgentStep[], totalDocs: number): number {
-  if (steps.length === 0) return 0.3;
+// ═══════════════════════════════════════════════════════════════════════════
+// CALCULATE CONFIDENCE
+// ═══════════════════════════════════════════════════════════════════════════
 
-  let confidence = 0.5;
+function calculateConfidence(steps: AgentStep[], docsFound: number): number {
+  let confidence = 0.3;  // Base confidence
 
   // More docs = higher confidence
-  if (totalDocs >= 10) confidence += 0.25;
-  else if (totalDocs >= 5) confidence += 0.15;
-  else if (totalDocs >= 1) confidence += 0.05;
+  if (docsFound >= 5) confidence += 0.3;
+  else if (docsFound >= 3) confidence += 0.2;
+  else if (docsFound >= 1) confidence += 0.1;
 
-  // Successful steps boost confidence
-  const successRate = steps.filter(s => s.observation.success).length / steps.length;
-  confidence += successRate * 0.2;
+  // Successful tool calls boost confidence
+  const successfulSteps = steps.filter(s => s.observation.success).length;
+  confidence += Math.min(successfulSteps * 0.1, 0.3);
 
   return Math.min(confidence, 0.95);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// TEST
-// ═══════════════════════════════════════════════════════════════════════════
-
-export async function testAgent() {
-  const result = await runAgent('Vilka lagar reglerar allemansrätten i Sverige?');
-  console.log('\n📊 RESULTAT:', JSON.stringify({
-    confidence: result.confidence,
-    iterations: result.iterations,
-    sources: result.sources.length,
-    time: result.total_time_ms,
-    jail_warden: result.jail_warden_status,
-  }, null, 2));
 }

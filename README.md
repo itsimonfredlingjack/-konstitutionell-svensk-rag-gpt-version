@@ -6,8 +6,25 @@ Agentic RAG system för svenska myndighetsdokument.
 
 ```
 User → Frontend (3001) → Backend API (8000) → ChromaDB
-                      ↘ llama-server (8080) ↗
+                       ↘ Ollama (11434) ↗
+                         ├─ gemma3:12b (BRAIN)
+                         └─ gpt-sw3:6.7b (VOICE)
 ```
+
+## Två-modell System
+
+| Modell | Roll | Används för |
+|--------|------|-------------|
+| **Gemma 3 12B** | BRAIN | Faktasvar, RAG, juridisk analys |
+| **GPT-SW3 6.7B** | VOICE | Chat, style pass, naturlig svenska |
+
+## Response Modes
+
+| Mode | Beskrivning | Källor |
+|------|-------------|--------|
+| CHAT | Konversation utan RAG | Aldrig |
+| ASSIST | Smart svar med tvåpass | Bakom toggle |
+| EVIDENCE | Fullständig verifiering | Alltid synliga |
 
 ## Tjänster
 
@@ -15,19 +32,24 @@ User → Frontend (3001) → Backend API (8000) → ChromaDB
 |---------|------|-------------|
 | constitutional-gpt | 3001 | Next.js frontend |
 | simons-ai-backend | 8000 | FastAPI + ChromaDB access |
-| llama-server | 8080 | GPT-OSS 20B inference |
+| Ollama | 11434 | LLM inference (Gemma + GPT-SW3) |
 
 ## Starta/Stoppa
 
 ```bash
 # Visa status
-sudo systemctl status constitutional-gpt llama-server simons-ai-backend
+systemctl --user status constitutional-gpt
+lsof -i :3001 :8000 :11434
+
+# Kontrollera Ollama-modeller
+ollama list
+ollama ps
 
 # Starta om frontend
-sudo systemctl restart constitutional-gpt
+systemctl --user restart constitutional-gpt
 
 # Loggar
-sudo journalctl -u constitutional-gpt -f
+journalctl --user -u constitutional-gpt -f
 ```
 
 ## Utveckling
@@ -35,6 +57,7 @@ sudo journalctl -u constitutional-gpt -f
 Frontend har HMR aktiverat - bara redigera filer:
 - Pages: `app/page.tsx`
 - API Client: `lib/api.ts`
+- Orchestration: `lib/orchestration/`
 - Agent Logic: `lib/agentic-rag/`
 
 ## Dataflöde
@@ -42,23 +65,27 @@ Frontend har HMR aktiverat - bara redigera filer:
 1. **Fråga från användare**
    - `useChat()` hook i `lib/hooks.ts`
    - Kallar `agentQuery()` i `lib/api.ts`
+   - Orchestrator bestämmer mode (CHAT/ASSIST/EVIDENCE)
 
-2. **Dokumentsökning**
-   - POST `/api/constitutional/search` (backend:8000)
-   - ChromaDB semantic search med fallback till text search
+2. **CHAT (GPT-SW3)**
+   - Ingen dokumentsökning
+   - Direkt svar via GPT-SW3
+   - Naturlig konversation
 
-3. **LLM Svar**
-   - POST `/v1/chat/completions` (llama-server:8080)
-   - GPT-OSS 20B med Harmony template
-   - Jail Warden v2 validering
+3. **ASSIST (Tvåpass)**
+   - ChromaDB semantic search
+   - Pass A: Gemma genererar sakligt draft
+   - Pass B: GPT-SW3 applicerar naturlig svenska
+   - Källor bakom toggle
 
-4. **Källor**
-   - Max 5 dokument visas med [1], [2] etc.
+4. **EVIDENCE (Gemma)**
+   - ChromaDB semantic search
+   - Gemma genererar tekniskt svar
+   - Källor alltid synliga
+
+5. **Verifiering**
+   - Jail Warden v2 kollar fakta mot källor
    - Hallucinerande citat tas bort automatiskt
-
-## Modeller
-
-**VIKTIGT:** GPT-OSS 20B är huvudmodellen för all kommunikation. Ta inte bort!
 
 ## ChromaDB Collections
 

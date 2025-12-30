@@ -14,13 +14,13 @@ export const LogStream = () => {
             </div>
 
             <div className="flex flex-col gap-2 font-mono text-[9px] text-purple-200/60 overflow-hidden">
-                {/* Fake logs */}
-                <div className="opacity-90"><span className="text-white/30">[17:24:01]</span> {">>"} [GEMMA-270M] Intent detected: "Recall Procedure"</div>
-                <div className="opacity-80"><span className="text-white/30">[17:24:02]</span> {">>"} [HERMES-8B] Reasoning loop complete (3 steps)</div>
-                <div className="opacity-70 text-emerald-400/80"><span className="text-white/30">[17:24:02]</span> {">>"} [QDRANT] Context retrieved & verified</div>
-                <div className="opacity-60"><span className="text-white/30">[17:24:03]</span> {">>"} [HERMES-8B] Handoff payload prepared</div>
-                <div className="opacity-50 text-cyan-400/80"><span className="text-white/30">[17:24:03]</span> {">>"} [GPT-OSS] Receiving context stream...</div>
-                <div className="text-cyan-400 font-bold animate-pulse"><span className="text-white/30">[17:24:05]</span> {">>"} [GPT-OSS] GENERATING RESPONSE...</div>
+                {/* Pipeline logs - Two-model architecture */}
+                <div className="opacity-90"><span className="text-white/30">[17:24:01]</span> {">>"} [ORCHESTRATOR] Query analyzed → ASSIST mode</div>
+                <div className="opacity-80"><span className="text-white/30">[17:24:02]</span> {">>"} [CHROMADB] Retrieving documents...</div>
+                <div className="opacity-70 text-emerald-400/80"><span className="text-white/30">[17:24:02]</span> {">>"} [CHROMADB] Context retrieved (5 docs)</div>
+                <div className="opacity-60"><span className="text-white/30">[17:24:03]</span> {">>"} [GEMMA-3] Pass A: Generating draft...</div>
+                <div className="opacity-50 text-cyan-400/80"><span className="text-white/30">[17:24:04]</span> {">>"} [GPT-SW3] Pass B: Applying style...</div>
+                <div className="text-cyan-400 font-bold animate-pulse"><span className="text-white/30">[17:24:05]</span> {">>"} [GPT-SW3] STREAMING RESPONSE...</div>
             </div>
 
             {/* Overlay gradient for fade effect */}

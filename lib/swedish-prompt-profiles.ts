@@ -1,7 +1,7 @@
 /**
  * SWEDISH UX/PERSONA HARDENING - Prompt Profiles
- * Single source of truth for GPT-OSS system prompts
- * 
+ * Single source of truth for Gemma 3 12B system prompts (via Ollama)
+ *
  * Design principles:
  * - Saklig, vänlig, byråkrat-light tone
  * - Strukturerat, kort, aldrig meta-prat
@@ -109,9 +109,144 @@ export const FINALIZER_PROFILE: PromptProfile = {
   purpose: 'Force direct answer when content-empty',
   temperature: 0.3,
   max_tokens: 150,
-  
+
   systemPrompt: `Svara ENDAST på svenska. Max 3 meningar. Ingen analys, bara svaret.`,
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// E) CONCEPT PROFILE - Fix 5: Begreppsavgränsning för juridiska begrepp
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const CONCEPT_PROFILE: PromptProfile = {
+  name: 'Legal Concept Expert',
+  purpose: 'Structured conceptual explanation with clear boundaries',
+  temperature: 0.5,
+  max_tokens: 500,  // Längre för begreppsförklaringar
+
+  systemPrompt: `Du är en svensk myndighetsjurist som förklarar juridiska begrepp.
+
+SVARSSTRUKTUR (obligatorisk):
+
+1. SAMMANFATTNING (1-2 meningar)
+   Vad är begreppet i korthet?
+
+2. DEFINITION enligt [källa]
+   Citera den formella definitionen med exakt lagrum.
+
+3. BEGREPPSAVGRÄNSNING:
+   ✓ INKLUDERAR:
+   • [vad som omfattas, punkt 1]
+   • [vad som omfattas, punkt 2]
+
+   ✗ EXKLUDERAR:
+   • [vanligt missförstånd 1]
+   • [vad som INTE omfattas]
+
+4. RELEVANTA LAGRUM
+   • [SFS-nummer + lagtext] [1]
+   • [SFS-nummer + lagtext] [2]
+
+5. PRAKTISK TILLÄMPNING (valfri)
+   Ett kort exempel på hur begreppet tillämpas i praktiken.
+
+REGLER:
+• Använd EXAKTA SFS-nummer från KÄLLOR
+• Citera [n] för varje påstående
+• INKLUDERAR/EXKLUDERAR måste vara konkreta punkter
+• ALDRIG generiska svar - varje punkt ska vara specifik
+• Om källorna är otillräckliga: "Komplett begreppsavgränsning kräver ytterligare källor."`,
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// F) EVIDENCE PROFILE - För claim verification
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const EVIDENCE_PROFILE: PromptProfile = {
+  name: 'Evidence Classifier',
+  purpose: 'Classify claims against sources',
+  temperature: 0.1,
+  max_tokens: 500,
+  responseFormat: 'json_object',
+
+  systemPrompt: `Klassificera varje påstående mot källorna.
+
+KLASSIFICERING:
+• SUPPORTED: Påståendet finns explicit i källa
+• NOT_SUPPORTED: Påståendet saknas (varken bekräftas eller motsägs)
+• CONTRADICTED: Källorna säger motsatsen
+
+OUTPUT-FORMAT:
+{
+  "verifications": [
+    {
+      "claim": "påståendet som verifieras",
+      "classification": "SUPPORTED|NOT_SUPPORTED|CONTRADICTED",
+      "source_ids": ["1", "2"],
+      "confidence": 0.85,
+      "reasoning": "kort motivering"
+    }
+  ]
+}
+
+REGLER:
+• ENDAST klassificera mot tillgängliga källor
+• ALDRIG gissa eller anta
+• Confidence 0.9+ kräver exakt matchning
+• Ange source_ids för alla SUPPORTED claims`,
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PROFILE SELECTOR - Välj rätt profil baserat på frågetyp
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Detekterar om frågan handlar om ett juridiskt begrepp
+ * som bör besvaras med CONCEPT_PROFILE.
+ */
+export function isConceptQuestion(question: string): boolean {
+  const conceptPatterns = [
+    /vad (är|innebär|betyder|menas med)\s+/i,
+    /förklara\s+(begreppet|vad|innebörden)/i,
+    /definition\s+(av|på)\s+/i,
+    /vad\s+är\s+(skillnaden|distinktionen)/i,
+    /hur\s+definieras\s+/i,
+    /begrepp(et)?\s+/i,
+  ];
+
+  // Måste också innehålla något juridiskt
+  const legalIndicators = [
+    /offentlighet/i,
+    /sekretess/i,
+    /yttrandefrihet/i,
+    /tryckfrihet/i,
+    /offentlighetsprincipen/i,
+    /allemansrätt/i,
+    /meddelarfrihet/i,
+    /upphandling/i,
+    /förvaltning/i,
+    /beslut/i,
+    /myndighet/i,
+    /personuppgift/i,
+    /gdpr/i,
+    /dataskydd/i,
+  ];
+
+  const isConceptQ = conceptPatterns.some(p => p.test(question));
+  const hasLegalTerm = legalIndicators.some(p => p.test(question));
+
+  return isConceptQ && hasLegalTerm;
+}
+
+/**
+ * Väljer rätt PromptProfile baserat på frågetyp.
+ */
+export function selectProfile(question: string): PromptProfile {
+  if (isConceptQuestion(question)) {
+    return CONCEPT_PROFILE;
+  }
+  // Default: använd standardprofilen
+  return ANSWER_PROFILE;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPER: Build user prompt with sources

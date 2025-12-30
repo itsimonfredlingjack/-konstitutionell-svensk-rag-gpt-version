@@ -2,39 +2,81 @@
 
 Direct RAG för svenska myndighetsdokument (535K docs i ChromaDB).
 
-## Modeller - KRITISK KONFIGURATION
+## Modeller - Två-modell Arkitektur
 
-| Modell | Roll | Backend |
-|--------|------|---------|
-| **gpt-oss** | Alla LLM-anrop | llama-server (port 8080) |
+| Modell | Alias | Roll | Backend |
+|--------|-------|------|---------|
+| **gemma3:12b** | BRAIN | Faktasvar, RAG, analys | Ollama (port 11434) |
+| **fcole90/ai-sweden-gpt-sw3:6.7b** | VOICE | Chat, style pass, naturlig svenska | Ollama (port 11434) |
 
-**Hermes och Ollama är BORTTAGNA.** Constitutional-GPT använder ENDAST llama-server.
+## Response Modes
+
+| Mode | Modell(er) | Retrieval | Källor |
+|------|-----------|-----------|--------|
+| **CHAT** | GPT-SW3 only | ❌ | Aldrig |
+| **ASSIST** | Gemma → GPT-SW3 | ✅ | Bakom toggle |
+| **EVIDENCE** | Gemma only | ✅ | Alltid synliga |
 
 ## Arkitektur
 
 ```
-Fråga → ChromaDB (sökning) → GPT-OSS (svar) → Warden v2 (verifiering)
+CHAT:     Fråga → GPT-SW3 → Svar (ingen RAG)
+ASSIST:   Fråga → ChromaDB → Gemma (draft) → GPT-SW3 (style) → Svar
+EVIDENCE: Fråga → ChromaDB → Gemma → Svar med citat
 ```
 
-Tool-calling är DISABLED eftersom gpt-oss inte stöder strukturerade tool_calls.
-Direct RAG används istället: search → context → LLM.
+## Tvåpass ASSIST Flow
 
-## GPT-OSS Beteende
+1. **Pass A (BRAIN)**: Gemma genererar sakligt draft med citat [1], [2]
+   - Låg temperatur (0.1) för precision
+   - Strukturerad JSON-output via `format`-parameter
 
-GPT-OSS körs med Harmony template via `--jinja` och `--reasoning-format auto`.
-Reasoning effort styrs via server-side `--chat-template-kwargs '{"reasoning_effort":"low"}'`.
+2. **Pass B (VOICE)**: GPT-SW3 skriver om till naturlig svenska
+   - Behåller all sakinfo och citat-markeringar
+   - Tar bort stela byråkrat-formuleringar
 
-Svar finns ALLTID i `content`-fältet. `reasoning_content` exponeras ALDRIG till användare.
-Vid tom `content` körs en finalizer-retry.
+## Structured Outputs
+
+Använder Ollamas `format`-parameter för garanterad JSON:
+
+```typescript
+const response = await callOllama({
+  model: 'gemma3:12b',
+  messages: [...],
+  format: CANONICAL_RESPONSE_JSON_SCHEMA,  // Schema-bound output
+});
+```
+
+## CanonicalResponse Schema
+
+```typescript
+interface CanonicalResponse {
+  answer: string;       // Huvudsvar
+  followups: string[];  // Max 3 följdfrågor
+  mode: 'CHAT' | 'ASSIST' | 'EVIDENCE';
+  citations?: Citation[];  // Endast ASSIST/EVIDENCE
+  confidence?: number;     // 0-1
+  debug?: DebugInfo;
+}
+```
 
 ## Filer
 
-- `agent-loop.ts` - Huvudloop, direct RAG-strategi
-- `tools.ts` - search_documents, think_longer, etc.
-- `api.ts` - Warden v2, citation gating
+- `agent-loop.ts` - Huvudloop med mode-routing
+- `tools.ts` - search_documents, think_longer
+- `../orchestration/orchestrator.ts` - Query-analys och mode-beslut
+- `../orchestration/ollama-client.ts` - Ollama API med structured outputs
+- `../orchestration/response-schema.ts` - CanonicalResponse definitioner
+- `../api.ts` - Frontend API med Jail Warden v2
 
-## VARNING
+## Guardrails
 
-- Använd INTE Ollama - endast llama-server (port 8080)
-- Återinför ALDRIG Hermes
-- GPT-OSS är huvudmodellen för all kommunikation
+- **CHAT** triggar ALDRIG retrieval (runtime-check)
+- **QueryType → Mode** mappning i orchestrator
+- Jail Warden v2 verifierar fakta mot källor
+
+## VIKTIGT
+
+- Använd Ollama (port 11434), INTE llama-server
+- Gemma = BRAIN (faktasvar), GPT-SW3 = VOICE (naturlig svenska)
+- CHAT-mode använder ALDRIG dokument eller lagcitat

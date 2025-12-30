@@ -158,6 +158,9 @@ export interface ChatMessage {
   wasRouted?: boolean;       // true if handled without RAG
   queryType?: string;        // SMALLTALK, LEGAL_QUERY, etc.
   evidenceLevel?: 'HIGH' | 'LOW' | 'NONE';  // For nuanced UI display
+  // Orchestration additions
+  mode?: 'CHAT' | 'ASSIST' | 'EVIDENCE';  // Response mode
+  showCitations?: boolean;   // Whether to show citations (EVIDENCE mode shows always, ASSIST hides behind toggle)
 }
 
 export function useChat() {
@@ -192,10 +195,24 @@ export function useChat() {
       // - hasSource = sources > 0 (for showing "relaterade träffar")
       // - wasRouted = true if query was handled without RAG (smalltalk, meta)
       const hasRealSources = response.sources && response.sources.length > 0;
-      
+
       // STRICT: Only FACT_VERIFIED means the answer is actually grounded in sources
       // TERM_CORRECTED and CITATIONS_STRIPPED mean sources exist but evidence may be weak
       const isVerified = response.warden_status === 'FACT_VERIFIED';
+
+      // Determine mode based on evidence level and routing
+      // CHAT: Routed without RAG (smalltalk, meta, feedback)
+      // EVIDENCE: HIGH evidence level
+      // ASSIST: Everything else (LOW evidence, normal queries)
+      let mode: 'CHAT' | 'ASSIST' | 'EVIDENCE' = 'ASSIST';
+      if (response.was_routed) {
+        mode = 'CHAT';
+      } else if (response.evidence_level === 'HIGH') {
+        mode = 'EVIDENCE';
+      }
+
+      // Show citations: Always for EVIDENCE, hidden for CHAT, toggle for ASSIST
+      const showCitations = mode === 'EVIDENCE';
 
       setMessages((prev) =>
         prev.map((msg) =>
@@ -210,6 +227,8 @@ export function useChat() {
                 wasRouted: response.was_routed,
                 queryType: response.query_type,
                 evidenceLevel: response.evidence_level,
+                mode,
+                showCitations,
               }
             : msg
         )
@@ -290,7 +309,7 @@ export interface PipelineStep {
 export function usePipelineStatus() {
   const [steps, setSteps] = useState<PipelineStep[]>([
     { id: 'search', name: 'ChromaDB', role: 'Sökning', status: 'idle' },
-    { id: 'gpt-oss', name: 'GPT-OSS', role: 'Svar (llama-server)', status: 'idle' },
+    { id: 'gemma', name: 'Gemma 3 12B', role: 'Svar (Ollama)', status: 'idle' },
     { id: 'warden', name: 'Jail Warden v2', role: 'Verifiering', status: 'idle' },
   ]);
 

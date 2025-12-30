@@ -4,11 +4,11 @@ import { ShieldCheck, ArrowRight, BrainCircuit, Database, Cpu } from "lucide-rea
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 
-// Define the pipeline steps
+// Define the pipeline steps - Two-model architecture
 const steps = [
     { id: "chromadb", name: "ChromaDB", role: "Vektordatabas", status: "complete" },
-    { id: "llama-server", name: "llama server", role: "Inferensmotor", status: "complete" },
-    { id: "gpt-oss", name: "GPT-OSS", role: "Chattagent", status: "active" }
+    { id: "gemma", name: "Gemma 3", role: "BRAIN (Faktasvar)", status: "complete" },
+    { id: "gpt-sw3", name: "GPT-SW3", role: "VOICE (Svenska)", status: "active" }
 ];
 
 export const ConstitutionalLens = () => {

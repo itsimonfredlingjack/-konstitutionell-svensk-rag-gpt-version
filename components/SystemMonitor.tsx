@@ -62,7 +62,7 @@ export const SystemMonitor = () => {
             <div className="mt-4 pt-3 border-t border-white/5">
                 <div className="flex items-center gap-2 opacity-60">
                     <span className="text-cyan-400 font-mono text-[9px]">{">>"}</span>
-                    <span className="text-[10px] text-white/70 font-mono truncate">GPT-OSS: Streaming...</span>
+                    <span className="text-[10px] text-white/70 font-mono truncate">GPT-SW3: Streaming...</span>
                 </div>
             </div>
 
@@ -92,25 +92,25 @@ export const SystemMonitor = () => {
                             <Cpu size={12} className="text-purple-400" />
                         </div>
 
-                        {/* Memory Bars for Models */}
+                        {/* Memory Bars for Models - Two-model architecture */}
                         <div className="space-y-3">
                             <div>
                                 <div className="flex justify-between text-[9px] font-mono text-white/40 mb-1">
-                                    <span>EuroLLM-22B</span>
-                                    <span className="text-purple-300">Loading</span>
+                                    <span>Gemma 3 12B (BRAIN)</span>
+                                    <span className="text-purple-300">Active</span>
                                 </div>
                                 <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
-                                    <div className="h-full w-[0%] bg-purple-500 animate-[pulse_3s_infinite]" style={{ width: '85%' }} />
+                                    <div className="h-full w-[0%] bg-purple-500 animate-[pulse_3s_infinite]" style={{ width: '70%' }} />
                                 </div>
                             </div>
 
                             <div>
                                 <div className="flex justify-between text-[9px] font-mono text-white/40 mb-1">
-                                    <span>Hermes-3 (8B)</span>
-                                    <span className="text-white/20">Cached</span>
+                                    <span>GPT-SW3 6.7B (VOICE)</span>
+                                    <span className="text-cyan-300">Cached</span>
                                 </div>
                                 <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
-                                    <div className="h-full w-[30%] bg-indigo-500/50" />
+                                    <div className="h-full w-[40%] bg-cyan-500/50" />
                                 </div>
                             </div>
                         </div>

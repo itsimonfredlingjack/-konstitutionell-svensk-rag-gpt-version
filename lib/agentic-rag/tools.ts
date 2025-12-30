@@ -7,11 +7,23 @@
 // VERKTYG FÖR AGENTIC RAG
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// Tool-calling är ENABLED: gpt-oss stöder tool_calls via llama-server.
+// Tool-calling är ENABLED: Gemma stöder tool_calls via Ollama.
 // Verktyg anropas via direct RAG-strategi i agent-loop.ts.
 //
-// Alla LLM-anrop går via llama-server (port 8080), INTE Ollama.
+// Alla LLM-anrop går via Ollama (port 11434).
+//
+// HYBRID SEARCH: Kombinerar BM25 keyword search med semantisk sökning
+// - BM25: Exakta juridiska termer (SFS, lagnamn, förkortningar)
+// - Semantisk: Koncept och synonymer via embeddings
+// - Viktning: 0.3 BM25 + 0.7 semantisk (auto-justeras)
 // ═══════════════════════════════════════════════════════════════════════════
+
+import {
+  hybridSearch,
+  shouldUseBM25,
+  getRecommendedWeights,
+  type HybridSearchResult,
+} from './hybrid-search';
 
 const BACKEND_URL = 'http://localhost:8000';
 const N8N_WEBHOOK_URL = 'http://localhost:5678/webhook'; // Adjust as needed
@@ -110,10 +122,57 @@ export const TOOLS: Tool[] = [
  */
 
 // ─────────────────────────────────────────────────────────────────
-// search_documents - ChromaDB/Backend search
+// search_documents - HYBRID SEARCH (BM25 + ChromaDB Semantic)
 // ─────────────────────────────────────────────────────────────────
 async function searchDocuments(params: Record<string, any>): Promise<ToolResult> {
   try {
+    const rawQuery = params.query || '';
+    const limit = Math.min(params.limit || 10, 20);
+
+    // Decide if we should use hybrid search
+    const useHybrid = shouldUseBM25(rawQuery);
+
+    if (useHybrid) {
+      // ════════════════════════════════════════════════════════════
+      // HYBRID SEARCH: BM25 + Semantic
+      // ════════════════════════════════════════════════════════════
+      const weights = getRecommendedWeights(rawQuery);
+      console.log(`🔀 search_documents [HYBRID]: "${rawQuery}" (BM25: ${weights.bm25}, Semantic: ${weights.semantic})`);
+
+      const hybridResults = await hybridSearch(rawQuery, {
+        limit,
+        docType: params.doc_type,
+        year: params.year,
+        bm25Weight: weights.bm25,
+        semanticWeight: weights.semantic,
+      });
+
+      const results = hybridResults.map((item: HybridSearchResult, idx: number) => ({
+        id: item.id || `result-${idx}`,
+        title: item.title || 'Untitled',
+        preview: item.preview || item.content?.substring(0, 300) || '',
+        content: item.content,
+        score: Math.round(item.hybridScore * 100),
+        bm25Score: Math.round(item.bm25Score * 100),
+        semanticScore: Math.round(item.semanticScore * 100),
+        source: item.source || item.docType || 'Unknown',
+        docType: item.docType,
+        year: item.year,
+        searchType: 'hybrid',
+      }));
+
+      console.log(`   → Hittade ${results.length} dokument (hybrid)`);
+
+      return {
+        success: true,
+        data: results
+      };
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // SEMANTIC-ONLY SEARCH (fallback for conceptual queries)
+    // ════════════════════════════════════════════════════════════
+
     // Build filters in the format expected by constitutional_routes.py
     const filters: any = {};
     if (params.doc_type) filters.doc_type = params.doc_type.toLowerCase();
@@ -121,7 +180,6 @@ async function searchDocuments(params: Record<string, any>): Promise<ToolResult>
 
     // Extract the most important keyword for text search
     // Prioritize longer, more specific words (likely to be the subject)
-    const rawQuery = params.query || '';
     const stopWords = ['i', 'och', 'att', 'som', 'för', 'på', 'av', 'med', 'en', 'ett', 'den', 'det', 'är', 'var', 'ska', 'kan', 'om', 'till', 'från', 'lagar', 'reglering', 'reglerar', 'sverige', 'svensk', 'svenska', 'vilka', 'vilken', 'vilket', 'vad', 'hur', 'finns', 'finnas', 'gäller', 'innebär'];
     const words = rawQuery.toLowerCase().split(/\s+/).filter((w: string) =>
       w.length > 3 && !stopWords.includes(w)
@@ -131,13 +189,13 @@ async function searchDocuments(params: Record<string, any>): Promise<ToolResult>
 
     const body: any = {
       query: searchQuery,
-      limit: Math.min(params.limit || 10, 20),
+      limit,
       page: 1,
       sort: 'relevance',
       filters: Object.keys(filters).length > 0 ? filters : undefined,
     };
 
-    console.log(`🔍 search_documents: "${params.query}" → "${searchQuery}" (limit: ${body.limit})`);
+    console.log(`🔍 search_documents [SEMANTIC]: "${params.query}" → "${searchQuery}" (limit: ${body.limit})`);
 
     const response = await fetch(`${BACKEND_URL}/api/constitutional/search`, {
       method: 'POST',
@@ -158,13 +216,15 @@ async function searchDocuments(params: Record<string, any>): Promise<ToolResult>
       id: item.id || `result-${idx}`,
       title: item.title || 'Untitled',
       preview: item.snippet || item.content?.substring(0, 300) || '',
+      content: item.content || item.snippet,
       score: Math.round((item.score || 0) * 100),
       source: item.source || item.doc_type || 'Unknown',
       docType: item.doc_type,
       year: item.year,
+      searchType: 'semantic',
     }));
 
-    console.log(`   → Hittade ${results.length} dokument`);
+    console.log(`   → Hittade ${results.length} dokument (semantic)`);
 
     return {
       success: true,
@@ -274,7 +334,7 @@ async function webSearch(params: Record<string, any>): Promise<ToolResult> {
 // ─────────────────────────────────────────────────────────────────
 // think_longer - Multi-model ensemble för djupare analys
 // ─────────────────────────────────────────────────────────────────
-const LLAMA_SERVER_URL = 'http://localhost:8080';
+const OLLAMA_URL = 'http://localhost:11434';
 
 interface ModelResponse {
   model: string;
@@ -338,23 +398,32 @@ Ge ett koncist, välgrundat svar. Var specifik och citera källor om möjligt.`;
     console.log('   → n8n inte tillgänglig, kör lokal ensemble...');
   }
 
-  // Fallback: Local parallel calls to llama-server with different temperatures
+  // Fallback: Local parallel calls to Ollama with different temperatures
   try {
     const modelConfigs = [
-      { name: 'gpt-oss', temp: 0.1, role: 'Strikt faktabaserad' },
-      { name: 'gpt-oss', temp: 0.7, role: 'Balanserad analys' },
-      { name: 'gpt-oss', temp: 0.9, role: 'Kreativ/explorativ' },
+      { name: 'gemma3:12b', temp: 0.1, role: 'Strikt faktabaserad' },
+      { name: 'gemma3:12b', temp: 0.7, role: 'Balanserad analys' },
+      { name: 'gemma3:12b', temp: 0.9, role: 'Kreativ/explorativ' },
     ];
 
-    console.log(`   → Kör ${modelConfigs.length} parallella anrop till llama-server...`);
+    console.log(`   → Kör ${modelConfigs.length} parallella anrop till Ollama...`);
 
-    // Run all models in parallel via llama-server /v1/chat/completions
+    // Run all models in parallel via Ollama OpenAI-compatible API
     const promises = modelConfigs.map(async (config): Promise<ModelResponse> => {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-        const resp = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
+        // Use native Ollama /api/chat with structured output
+        const analysisSchema = {
+          type: 'object',
+          properties: {
+            analysis: { type: 'string', description: 'Djupgående analys av materialet' },
+          },
+          required: ['analysis'],
+        };
+
+        const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -363,8 +432,12 @@ Ge ett koncist, välgrundat svar. Var specifik och citera källor om möjligt.`;
               { role: 'system', content: `Du är en ${config.role.toLowerCase()} juridisk expert.` },
               { role: 'user', content: analysisPrompt }
             ],
-            temperature: config.temp,
-            max_tokens: 500,
+            stream: false,
+            format: analysisSchema,
+            options: {
+              temperature: config.temp,
+              num_predict: 500,
+            },
           }),
           signal: controller.signal,
         });
@@ -376,10 +449,21 @@ Ge ett koncist, välgrundat svar. Var specifik och citera källor om möjligt.`;
         }
 
         const data = await resp.json();
+        const content = data.message?.content || '';
+
+        // Parse structured response
+        let analysisText = '';
+        try {
+          const parsed = JSON.parse(content);
+          analysisText = parsed.analysis || content;
+        } catch {
+          analysisText = content;
+        }
+
         return {
           model: config.name,
           temperature: config.temp,
-          response: data.choices?.[0]?.message?.content || '',
+          response: analysisText,
           confidence: 0.8, // Default confidence for local models
         };
       } catch {
@@ -537,10 +621,10 @@ export function getTool(name: string): Tool | undefined {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TOOL ROUTING - DISABLED (FunctionGemma/Hermes removed)
+// TOOL ROUTING - DISABLED (Direct RAG strategy)
 // ═══════════════════════════════════════════════════════════════════════════
 // Tool-calling via LLM är DISABLED. Verktyg väljs via direct RAG-strategi.
-// Om gpt-oss i framtiden stöder strukturerade tool_calls kan detta återaktiveras.
+// Gemma 3 12B används för faktasvar, GPT-SW3 6.7B för naturlig svenska.
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**

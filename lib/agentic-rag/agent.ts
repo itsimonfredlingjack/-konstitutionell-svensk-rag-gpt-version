@@ -1,13 +1,16 @@
 /**
  * Agentic RAG Agent
  * ReAct-style agent that reasons about retrieval strategy
- * 
- * NOTE: Uses llama-server (port 8080), NOT Ollama
+ *
+ * MODELS:
+ * - gemma3:12b (BRAIN): Tool planning and reasoning
+ * - Ollama on port 11434
  */
 
 import { TOOLS, getTool, formatToolsForPrompt, ToolResult } from './tools';
 
-const LLAMA_SERVER_URL = 'http://localhost:8080';
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+const BRAIN_MODEL = 'gemma3:12b';
 
 export interface AgentState {
   question: string;
@@ -290,24 +293,27 @@ async function observe(action: AgentAction, result: ToolResult): Promise<AgentOb
 }
 
 /**
- * Call LLM via llama-server (OpenAI-compatible API)
+ * Call LLM via Ollama API (using Gemma 3 as BRAIN)
  */
 async function callLLM(prompt: string): Promise<string> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-oss',
+        model: BRAIN_MODEL,
         messages: [
           { role: 'system', content: 'Du är en RAG-agent. Följ instruktionerna exakt.' },
           { role: 'user', content: prompt }
         ],
-        temperature: 0.3,
-        max_tokens: 200,
+        stream: false,
+        options: {
+          temperature: 0.3,
+          num_predict: 200,
+        },
       }),
       signal: controller.signal,
     });
@@ -315,11 +321,11 @@ async function callLLM(prompt: string): Promise<string> {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      throw new Error(`LLM error: ${response.status}`);
+      throw new Error(`Ollama error: ${response.status}`);
     }
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || '';
+    return data.message?.content || '';
   } catch (error) {
     clearTimeout(timeoutId);
     throw error;

@@ -18,17 +18,21 @@ NC='\033[0m' # No Color
 echo ""
 echo -e "${YELLOW}Test 1: Meta-läckage detektion${NC}"
 echo "Fråga: 'Hej GPT'"
+# NOTE: Using heredoc syntax to avoid JSON escaping issues
 RESPONSE=$(curl -s -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-oss",
-    "messages": [
-      {"role": "system", "content": "Du är en svensk myndighetsjurist. Svara på svenska."},
-      {"role": "user", "content": "Hej GPT"}
-    ],
-    "temperature": 0.3,
-    "max_tokens": 100
-  }')
+  --data-binary @- <<'JSON'
+{
+  "model": "gpt-oss",
+  "messages": [
+    {"role": "system", "content": "Du är en svensk myndighetsjurist. Svara på svenska."},
+    {"role": "user", "content": "Hej GPT"}
+  ],
+  "temperature": 0.3,
+  "max_tokens": 100
+}
+JSON
+)
 
 CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content')
 HAS_META=$(echo "$CONTENT" | grep -iE "^(The user|Let me|I will|We need|To answer|Let's)" && echo "true" || echo "false")
@@ -47,15 +51,18 @@ echo -e "${YELLOW}Test 2: Juridik utan källor (direkt llama-server)${NC}"
 echo "Fråga: 'Vilka lagar reglerar allemansrätten?'"
 RESPONSE=$(curl -s -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-oss",
-    "messages": [
-      {"role": "system", "content": "Du är en svensk juridisk expert. ALDRIG uppfinna SFS-nummer eller lagnamn. Om du inte vet, säg: Det framgår inte av tillgängliga källor."},
-      {"role": "user", "content": "Vilka lagar reglerar allemansrätten i Sverige?"}
-    ],
-    "temperature": 0.3,
-    "max_tokens": 200
-  }')
+  --data-binary @- <<'JSON'
+{
+  "model": "gpt-oss",
+  "messages": [
+    {"role": "system", "content": "Du är en svensk juridisk expert. ALDRIG uppfinna SFS-nummer eller lagnamn. Om du inte vet, säg: Det framgår inte av tillgängliga källor."},
+    {"role": "user", "content": "Vilka lagar reglerar allemansrätten i Sverige?"}
+  ],
+  "temperature": 0.3,
+  "max_tokens": 200
+}
+JSON
+)
 
 CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content')
 HAS_SFS=$(echo "$CONTENT" | grep -E "\b[0-9]{4}:[0-9]+\b" && echo "true" || echo "false")
@@ -73,15 +80,18 @@ echo ""
 echo -e "${YELLOW}Test 3: Reasoning separation (content vs reasoning_content)${NC}"
 RESPONSE=$(curl -s -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-oss",
-    "messages": [
-      {"role": "system", "content": "Svara på svenska."},
-      {"role": "user", "content": "Vad är TF?"}
-    ],
-    "temperature": 0.3,
-    "max_tokens": 150
-  }')
+  --data-binary @- <<'JSON'
+{
+  "model": "gpt-oss",
+  "messages": [
+    {"role": "system", "content": "Svara på svenska."},
+    {"role": "user", "content": "Vad är TF?"}
+  ],
+  "temperature": 0.3,
+  "max_tokens": 150
+}
+JSON
+)
 
 HAS_CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content' | grep -q . && echo "true" || echo "false")
 HAS_REASONING=$(echo "$RESPONSE" | jq -r '.choices[0].message.reasoning_content' | grep -q . && echo "true" || echo "false")

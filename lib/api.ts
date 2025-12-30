@@ -4,6 +4,7 @@
  */
 
 import { analyzeQuery, getOptimalSearchQuery, type QueryAnalysis, type QueryType } from './query-intelligence';
+import { getChatProfile, type ChatProfile } from './orchestration/chat-profiles';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // JAIL WARDEN - Swedish Law Corrections Dictionary
@@ -580,10 +581,10 @@ const getBaseUrl = (port: number) => {
 };
 
 const BACKEND_URL = getBaseUrl(8000);
-const LLAMA_SERVER_URL = getBaseUrl(8080);
+const OLLAMA_URL = getBaseUrl(11434);
 
-// NOTE: Constitutional-GPT uses llama-server (port 8080) only.
-// The legacy Ollama backend has been permanently removed.
+// NOTE: Constitutional-GPT uses Ollama with gemma3:12b
+// Previously used llama-server with GPT-OSS, now switched to Ollama
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -762,17 +763,15 @@ export async function getHealth(): Promise<{ status: string; uptime?: number } |
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// LLM - via llama-server (NOT Ollama)
+// LLM - via Ollama with gemma3:12b
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function getLoadedModels(): Promise<string[]> {
-  // Returns gpt-oss as the only model since we use llama-server
-  // llama-server doesn't have a /api/ps endpoint like Ollama
   try {
-    // Check if llama-server is responding
-    const response = await fetch(`${LLAMA_SERVER_URL}/health`);
+    const response = await fetch(`${OLLAMA_URL}/api/tags`);
     if (response.ok) {
-      return ['gpt-oss (llama-server)'];
+      const data = await response.json();
+      return data.models?.map((m: { name: string }) => m.name) || [];
     }
     return [];
   } catch {
@@ -780,13 +779,16 @@ export async function getLoadedModels(): Promise<string[]> {
   }
 }
 
-// NOTE: ReasoningEffort is now controlled via --chat-template-kwargs on llama-server
-// The server runs with {"reasoning_effort":"low"} by default
-// This ensures stable content output without thinking-leakage
+// Model configuration for Constitutional-GPT
+// BRAIN: Gemma 3 12B - factual answers, RAG, analysis
+// VOICE: GPT-SW3 6.7B - natural Swedish, chat, style pass
+const BRAIN_MODEL = 'gemma3:12b';
+const VOICE_MODEL = 'fcole90/ai-sweden-gpt-sw3:6.7b';
+const DEFAULT_MODEL = BRAIN_MODEL;  // Legacy alias
 
 export async function generateResponse(
   prompt: string,
-  model: string = 'gpt-oss',
+  model: string = DEFAULT_MODEL,
   options: { temperature?: number; max_tokens?: number; systemPrompt?: string } = {}
 ): Promise<string> {
   const {
@@ -796,19 +798,30 @@ export async function generateResponse(
   } = options;
 
   try {
-    // Use llama-server with Harmony chat template
-    // reasoning_effort is controlled via --chat-template-kwargs on server (default: low)
-    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
+    // Use native Ollama /api/chat with structured output
+    const ragResponseSchema = {
+      type: 'object',
+      properties: {
+        answer: { type: 'string', description: 'Svaret på användarens fråga baserat på dokumenten' },
+      },
+      required: ['answer'],
+    };
+
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-oss',
+        model: DEFAULT_MODEL,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: prompt }
         ],
-        temperature,
-        max_tokens,
+        stream: false,
+        format: ragResponseSchema,
+        options: {
+          temperature,
+          num_predict: max_tokens,
+        },
       }),
     });
 
@@ -817,24 +830,31 @@ export async function generateResponse(
     }
 
     const data = await response.json();
-    const message = data.choices?.[0]?.message;
-    const finishReason = data.choices?.[0]?.finish_reason;
+    const content = data.message?.content || '';
+    const finishReason = data.done ? 'stop' : 'length';
 
-    // 🔍 DIAGNOSTIK: Logga RAW JSON för att detektera Harmony-läckage
+    // Parse structured response
+    let message = { content: '' };
+    try {
+      const parsed = JSON.parse(content);
+      message = { content: parsed.answer || content };
+    } catch {
+      message = { content };
+    }
+
+    // 🔍 DIAGNOSTIK: Logga RAW JSON för att detektera problem
     // Aktivera genom att sätta DEBUG_RAW_RESPONSE=true i environment
     if (process.env.DEBUG_RAW_RESPONSE === 'true') {
-      console.log('🔍 RAW GPT-OSS RESPONSE:', JSON.stringify({
-        content: message?.content,
-        reasoning_content: message?.reasoning_content,
+      console.log('🔍 RAW GEMMA RESPONSE:', JSON.stringify({
+        content: message.content,
+        raw_api_content: content,
         finish_reason: finishReason,
-        has_content: !!message?.content,
-        has_reasoning: !!message?.reasoning_content,
+        has_content: !!message.content,
       }, null, 2));
     }
 
-    // Harmony template: content = final answer
-    // IMPORTANT: Never expose reasoning_content to users
-    let answer = message?.content || '';
+    // Structured output: answer field contains the final answer
+    let answer = message.content || '';
 
     // AUTO-REPAIR: Detektera meta-läckage från Harmony format
     const metaLeakPatterns = [
@@ -860,7 +880,7 @@ export async function generateResponse(
 
     // Content-empty recovery: run finalizer (no reasoning_content parsing)
     if (!answer) {
-      console.warn('⚠️ GPT-OSS: content empty, running finalizer');
+      console.warn('⚠️ Gemma: content empty, running finalizer');
       answer = await runFinalizer(prompt);
     }
 
@@ -892,14 +912,23 @@ async function runFinalizer(originalPrompt: string): Promise<string> {
   const cleanQuestion = questionMatch?.[1]?.trim() || originalPrompt.split('\n').pop() || originalPrompt;
 
   try {
-    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
+    // Use native Ollama /api/chat with structured output
+    const finalizerSchema = {
+      type: 'object',
+      properties: {
+        answer: { type: 'string', description: 'Ett kort direkt svar på frågan' },
+      },
+      required: ['answer'],
+    };
+
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-oss',
+        model: DEFAULT_MODEL,
         messages: [
-          { 
-            role: 'system', 
+          {
+            role: 'system',
             content: `Du är en svensk myndighetsjurist.
 
 REGLER:
@@ -911,8 +940,12 @@ REGLER:
           },
           { role: 'user', content: cleanQuestion }
         ],
-        temperature: 0.3,
-        max_tokens: 150,
+        stream: false,
+        format: finalizerSchema,
+        options: {
+          temperature: 0.3,
+          num_predict: 150,
+        },
       }),
     });
 
@@ -922,7 +955,16 @@ REGLER:
     }
 
     const data = await response.json();
-    let result = data.choices?.[0]?.message?.content || '';
+    const content = data.message?.content || '';
+
+    // Parse structured response
+    let result = '';
+    try {
+      const parsed = JSON.parse(content);
+      result = parsed.answer || content;
+    } catch {
+      result = content;
+    }
     
     // SISTA SÄKERHETSNÄT: Om finalizer OCKSÅ ger meta, fallback till statiskt svar
     const finalizerMetaPatterns = [
@@ -946,6 +988,102 @@ REGLER:
   } catch (error) {
     logMetric('finalizer_exception', { error: String(error) });
     return 'Fel vid generering av svar.';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LLM-BASED CHAT RESPONSES (for non-retrieval queries)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Generate a CHAT response using LLM without retrieval.
+ * Uses chat-profiles.ts for query-type-specific prompts.
+ *
+ * @param question - The user's question
+ * @param profile - The chat profile with system prompt and parameters
+ * @returns LLM-generated response (varierad, naturlig)
+ */
+async function generateChatResponse(
+  question: string,
+  profile: ChatProfile
+): Promise<string> {
+  // CHAT always uses VOICE_MODEL (GPT-SW3) for natural Swedish
+  const modelToUse = profile.model || VOICE_MODEL;
+
+  console.log(`💬 CHAT: Using ${modelToUse} (profile: ${profile.name})`);
+
+  // Use native Ollama /api/chat with structured output format
+  const chatResponseSchema = {
+    type: 'object',
+    properties: {
+      answer: { type: 'string', description: 'Svaret på användarens fråga' },
+      followups: {
+        type: 'array',
+        items: { type: 'string' },
+        maxItems: 3,
+        description: 'Relevanta följdfrågor'
+      }
+    },
+    required: ['answer']
+  };
+
+  try {
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelToUse,
+        messages: [
+          { role: 'system', content: profile.systemPrompt },
+          { role: 'user', content: question }
+        ],
+        stream: false,
+        format: chatResponseSchema,
+        options: {
+          temperature: profile.temperature,
+          num_predict: profile.max_tokens,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Chat generation failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const content = data.message?.content || '';
+
+    // Parse structured response
+    let answer = '';
+    try {
+      const parsed = JSON.parse(content);
+      answer = parsed.answer || content;
+    } catch {
+      // Fallback if not valid JSON
+      answer = content;
+    }
+
+    // Meta-läckage-skydd
+    const metaLeakPatterns = [
+      /^The user (says|asks|wants|is asking)/i,
+      /^Let me (think|analyze|consider|explain)/i,
+      /^I (will|shall|need to|should)/i,
+      /^(First|Now),? (I|let me)/i,
+    ];
+
+    if (answer && metaLeakPatterns.some(p => p.test(answer.trim()))) {
+      logMetric('chat_meta_leak_detected', {
+        profile: profile.name,
+        first_30_chars: answer.substring(0, 30),
+      });
+      answer = 'Hur kan jag hjälpa dig?';
+    }
+
+    return answer || 'Hur kan jag hjälpa dig?';
+  } catch (error) {
+    console.error('Chat generation error:', error);
+    logMetric('chat_generation_error', { error: String(error) });
+    return 'Hur kan jag hjälpa dig?';
   }
 }
 
@@ -1032,19 +1170,36 @@ export async function agentQuery(question: string): Promise<AgentResponse> {
     const queryIntent = classifyQueryIntent(question);
     reasoningSteps.push(`Intent: ${queryIntent}`);
 
-    // Handle non-RAG queries (smalltalk, system meta)
-    if (!queryAnalysis.shouldRetrieve && queryAnalysis.directResponse) {
-      reasoningSteps.push('Svarar direkt utan dokumentsökning');
+    // Handle non-RAG queries (smalltalk, system meta, feedback, etc.)
+    // Nu med LLM-genererade svar istället för hardcoded
+    if (!queryAnalysis.shouldRetrieve) {
+      reasoningSteps.push(`CHAT mode: Genererar svar med LLM (${queryAnalysis.type})`);
+
+      // Hämta profil baserat på QueryType
+      const chatProfile = getChatProfile(queryAnalysis.type);
+      reasoningSteps.push(`Profil: ${chatProfile.name} (temp: ${chatProfile.temperature})`);
+
+      // Generera svar med LLM
+      const chatAnswer = await generateChatResponse(question, chatProfile);
+
+      // GUARDRAIL: Verify no retrieval happens in CHAT mode
+      // This should never trigger, but log if it does
+      if (sources.length > 0) {
+        console.error('🚨 GUARDRAIL VIOLATION: Sources found in CHAT mode!');
+        logMetric('guardrail_violation_chat_retrieval', { queryType: queryAnalysis.type });
+      }
+
       return {
-        answer: queryAnalysis.directResponse,
+        answer: chatAnswer,
         sources: [],
         reasoning_steps: reasoningSteps,
-        model_used: 'router (no LLM)',
+        model_used: `${VOICE_MODEL} (chat: ${chatProfile.name})`,
         total_time_ms: Date.now() - startTime,
         warden_version: 'v2',
         warden_status: 'UNCHANGED',
         query_type: queryAnalysis.type,
         was_routed: true,
+        evidence_level: 'NONE',
       };
     }
 
@@ -1130,7 +1285,7 @@ ${context}
 
 ÄMNE: ${question}`;
 
-      const summary = await generateResponse(summaryPrompt, 'gpt-oss', {
+      const summary = await generateResponse(summaryPrompt, DEFAULT_MODEL, {
         temperature: 0.3,
         max_tokens: 200,
         systemPrompt: 'Du sammanfattar riksdagsmaterial. Använd ALDRIG formuleringar som "lagen säger" eller "enligt § X".',
@@ -1143,7 +1298,7 @@ ${context}
         answer: finalAnswer + sourcesSection,
         sources,
         reasoning_steps: reasoningSteps,
-        model_used: 'gpt-oss-20b (two-pass)',
+        model_used: 'gemma3:12b (two-pass)',
         total_time_ms: Date.now() - startTime,
         warden_version: 'v2',
         warden_status: 'CITATIONS_STRIPPED', // Inte FACT_VERIFIED
@@ -1154,44 +1309,36 @@ ${context}
       };
     }
 
-    // Step 3: Generate answer with GPT-OSS via llama-server
-    // Using EVIDENCE-FIRST prompting to force grounded answers
-    reasoningSteps.push('Genererar svar med GPT-OSS (Pass 1: strict)...');
-    
-    const userPrompt = `Du ska besvara en fråga baserat ENDAST på följande dokument.
+    // Step 3: Generate answer with Gemma via Ollama
+    // Natural conversational format (removed stiff "EVIDENS: ... SVAR: ..." structure)
+    reasoningSteps.push('Genererar svar med Gemma...');
 
-═══════════════════════════════════════════════════════════════
-DOKUMENT (din enda informationskälla):
-═══════════════════════════════════════════════════════════════
+    const userPrompt = `Besvara frågan baserat på följande dokument.
+
+DOKUMENT:
 ${context}
 
-═══════════════════════════════════════════════════════════════
 FRÅGA: ${question}
-═══════════════════════════════════════════════════════════════
 
-SVARA I DETTA FORMAT:
+INSTRUKTIONER:
+• Svara kortfattat och naturligt på svenska (max 5 meningar)
+• Basera svaret ENDAST på informationen i dokumenten
+• Om dokumenten inte besvarar frågan: säg det ärligt
+• Använd INTE rubriker som "EVIDENS:" eller "SVAR:" - skriv ett naturligt svar
+• Citera INTE med [1], [2] etc. - integrera information naturligt`;
 
-1. EVIDENS (citera 1-3 relevanta meningar från dokumenten ovan):
-   • "..." 
-   • "..."
+    let rawAnswer = await generateResponse(userPrompt, DEFAULT_MODEL, {
+      temperature: 0.4,  // Lite högre för mer naturligt språk
+      max_tokens: 400,   // Kortare för koncisa svar
+      systemPrompt: `Du är en kunnig svensk assistent.
 
-2. SVAR (baserat på evidensen ovan, max 3 meningar):
-   ...
-
-Om dokumenten INTE innehåller information som besvarar frågan, skriv:
-"Det framgår inte av tillgängliga dokument."`;
-
-    let rawAnswer = await generateResponse(userPrompt, 'gpt-oss', {
-      temperature: 0.2,
-      max_tokens: 600,
-      systemPrompt: `Du är en svensk juridisk expert. Du svarar ENDAST baserat på bifogade dokument.
-
-KRITISKA REGLER:
-• CITERA alltid evidens från dokumenten innan du svarar
+REGLER:
+• Svara naturligt och koncist på svenska
+• Basera dig ENDAST på bifogade dokument
 • Om dokumenten inte innehåller svaret: säg det ärligt
 • ALDRIG uppfinna SFS-nummer, paragrafer eller lagtext
-• ALDRIG "syntetisera" kunskap utanför dokumenten
-• Svara på svenska`,
+• ALDRIG använda stela format som "EVIDENS:" eller "SVAR:"
+• Var hjälpsam men inte övertydlig`,
     });
     reasoningSteps.push('Pass 1 svar genererat');
 
@@ -1217,7 +1364,7 @@ ${context}
 
 ÄMNE: ${question}`;
 
-      const pass2Answer = await generateResponse(pass2Prompt, 'gpt-oss', {
+      const pass2Answer = await generateResponse(pass2Prompt, DEFAULT_MODEL, {
         temperature: 0.3,
         max_tokens: 200,
         systemPrompt: 'Du sammanfattar dokument. Använd ALDRIG "lagen säger" eller paragrafnummer.',
@@ -1318,7 +1465,7 @@ ${context}
       answer: finalAnswer || 'Kunde inte generera svar.',
       sources,
       reasoning_steps: reasoningSteps,
-      model_used: pass2WasTriggered ? 'gpt-oss-20b (two-pass)' : 'gpt-oss-20b (llama-server)',
+      model_used: pass2WasTriggered ? 'gemma3:12b (two-pass)' : 'gemma3:12b (ollama)',
       total_time_ms: Date.now() - startTime,
 
       // Jail Warden v2 fields
@@ -1353,20 +1500,20 @@ ${context}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// STREAMING CHAT (for real-time responses) - via llama-server
+// STREAMING CHAT (for real-time responses) - via Ollama
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function* streamChat(
   prompt: string,
-  model: string = 'gpt-oss'
+  model: string = DEFAULT_MODEL
 ): AsyncGenerator<string> {
   try {
-    // Use llama-server streaming via /v1/chat/completions with stream: true
-    const response = await fetch(`${LLAMA_SERVER_URL}/v1/chat/completions`, {
+    // Use Ollama streaming via /v1/chat/completions with stream: true
+    const response = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-oss',
+        model: DEFAULT_MODEL,
         messages: [
           { role: 'system', content: 'Du är en svensk juridisk expert. Svara på svenska.' },
           { role: 'user', content: prompt }
