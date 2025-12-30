@@ -16,7 +16,7 @@ export const GlassPanel = ({ children, className, style, ...props }: GlassPanelP
             transition={{ duration: 0.8, ease: "easeOut" }}
             className={cn(
                 "relative rounded-3xl overflow-hidden",
-                "backdrop-blur-xl bg-glass-surface border border-glass-border",
+                "backdrop-blur-xl bg-surface-primary border border-border-default",
                 "shadow-glass",
                 "transform-style-3d transition-all duration-500",
                 className
