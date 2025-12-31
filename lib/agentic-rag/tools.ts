@@ -24,8 +24,8 @@ import {
   getRecommendedWeights,
   type HybridSearchResult,
 } from './hybrid-search';
+import { BACKEND_URL, LLM_URL } from '../config';
 
-const BACKEND_URL = 'http://localhost:8000';
 const N8N_WEBHOOK_URL = 'http://localhost:5678/webhook'; // Adjust as needed
 
 export interface Tool {
@@ -334,7 +334,6 @@ async function webSearch(params: Record<string, any>): Promise<ToolResult> {
 // ─────────────────────────────────────────────────────────────────
 // think_longer - Multi-model ensemble för djupare analys
 // ─────────────────────────────────────────────────────────────────
-const OLLAMA_URL = 'http://localhost:11434';
 
 interface ModelResponse {
   model: string;
@@ -423,7 +422,7 @@ Ge ett koncist, välgrundat svar. Var specifik och citera källor om möjligt.`;
           required: ['analysis'],
         };
 
-        const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
+        const resp = await fetch(`${LLM_URL}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

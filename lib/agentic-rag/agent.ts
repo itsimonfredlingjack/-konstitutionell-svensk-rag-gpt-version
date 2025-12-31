@@ -8,8 +8,8 @@
  */
 
 import { TOOLS, getTool, formatToolsForPrompt, ToolResult } from './tools';
+import { LLM_URL } from '../config';
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const BRAIN_MODEL = 'gemma3:12b';
 
 export interface AgentState {
@@ -300,7 +300,7 @@ async function callLLM(prompt: string): Promise<string> {
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    const response = await fetch(`${LLM_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

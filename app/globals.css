@@ -70,5 +70,5 @@ body {
 /* Custom global animations/util classes */
 .glass-panel {
     @apply bg-surface-primary shadow-glass relative border border-border-default;
-    backdrop-filter: blur(60px);
+    backdrop-filter: blur(12px);
 }

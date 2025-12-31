@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { cva, type VariantProps } from 'class-variance-authority';
 
 const panelVariants = cva(
-  'rounded-lg border border-border-default bg-surface-primary shadow-glass backdrop-blur-xl',
+  'rounded-lg border border-border-default bg-surface-primary shadow-glass backdrop-blur-md',
   {
     variants: {
       variant: {

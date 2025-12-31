@@ -7,7 +7,8 @@
  * 3. Bibehålla identitet utan att luta på dokument
  */
 
-const OLLAMA_URL = 'http://localhost:11434';
+import { LLM_URL } from '../config';
+
 const MEMORY_MODEL = 'gemma3:12b';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -130,7 +131,7 @@ SAMMANFATTNING:`;
       required: ['summary'],
     };
 
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    const response = await fetch(`${LLM_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

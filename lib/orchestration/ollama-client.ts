@@ -20,12 +20,11 @@ import {
   createCanonicalResponse,
   type ResponseMode,
 } from './response-schema';
+import { LLM_URL } from '../config';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
-
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -79,7 +78,7 @@ async function adaptiveUnload(newModel: 'VOICE' | 'BRAIN'): Promise<void> {
 
     try {
       // Send empty request with keep_alive: 0 to unload
-      await fetch(`${OLLAMA_URL}/api/chat`, {
+      await fetch(`${LLM_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -211,7 +210,7 @@ async function callOllama(options: OllamaRequestOptions): Promise<string> {
     body.keep_alive = options.keep_alive;
   }
 
-  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+  const response = await fetch(`${LLM_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -245,7 +244,7 @@ async function callOllamaOpenAI(options: OllamaRequestOptions): Promise<OllamaRe
     body.tools = options.tools;
   }
 
-  const response = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
+  const response = await fetch(`${LLM_URL}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
