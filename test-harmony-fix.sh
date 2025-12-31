@@ -23,7 +23,7 @@ RESPONSE=$(curl -s -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   --data-binary @- <<'JSON'
 {
-  "model": "gpt-oss",
+  "model": "ministral-3:14b",
   "messages": [
     {"role": "system", "content": "Du är en svensk myndighetsjurist. Svara på svenska."},
     {"role": "user", "content": "Hej GPT"}
@@ -53,7 +53,7 @@ RESPONSE=$(curl -s -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   --data-binary @- <<'JSON'
 {
-  "model": "gpt-oss",
+  "model": "ministral-3:14b",
   "messages": [
     {"role": "system", "content": "Du är en svensk juridisk expert. ALDRIG uppfinna SFS-nummer eller lagnamn. Om du inte vet, säg: Det framgår inte av tillgängliga källor."},
     {"role": "user", "content": "Vilka lagar reglerar allemansrätten i Sverige?"}
@@ -82,7 +82,7 @@ RESPONSE=$(curl -s -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   --data-binary @- <<'JSON'
 {
-  "model": "gpt-oss",
+  "model": "ministral-3:14b",
   "messages": [
     {"role": "system", "content": "Svara på svenska."},
     {"role": "user", "content": "Vad är TF?"}

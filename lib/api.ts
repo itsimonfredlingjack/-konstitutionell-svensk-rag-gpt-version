@@ -5,7 +5,6 @@
 
 import { analyzeQuery, getOptimalSearchQuery, type QueryAnalysis, type QueryType } from './query-intelligence';
 import { getChatProfile, type ChatProfile } from './orchestration/chat-profiles';
-import { BACKEND_URL, LLM_URL } from './config';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // JAIL WARDEN - Swedish Law Corrections Dictionary
@@ -573,8 +572,18 @@ export function logMetric(event: string, context?: Record<string, any>): void {
   console.warn(`📊 METRICS: ${JSON.stringify(metric)}`);
 }
 
-// NOTE: Constitutional-GPT uses Ollama with gemma3:12b
-// Previously used llama-server with GPT-OSS, now switched to Ollama
+// Use current hostname to allow access from other devices on the network
+const getBaseUrl = (port: number) => {
+  if (typeof window !== 'undefined') {
+    return `http://${window.location.hostname}:${port}`;
+  }
+  return `http://localhost:${port}`;
+};
+
+const BACKEND_URL = getBaseUrl(8000);
+const OLLAMA_URL = getBaseUrl(11434);
+
+// NOTE: Constitutional-GPT uses Ollama with ministral-3:14b (BRAIN) + GPT-SW3 (VOICE)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -753,12 +762,12 @@ export async function getHealth(): Promise<{ status: string; uptime?: number } |
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// LLM - via Ollama with gemma3:12b
+// LLM - via Ollama with ministral-3:14b
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function getLoadedModels(): Promise<string[]> {
   try {
-    const response = await fetch(`${LLM_URL}/api/tags`);
+    const response = await fetch(`${OLLAMA_URL}/api/tags`);
     if (response.ok) {
       const data = await response.json();
       return data.models?.map((m: { name: string }) => m.name) || [];
@@ -770,9 +779,9 @@ export async function getLoadedModels(): Promise<string[]> {
 }
 
 // Model configuration for Constitutional-GPT
-// BRAIN: Gemma 3 12B - factual answers, RAG, analysis
+// BRAIN: Ministral 3 14B - factual answers, RAG, analysis + NATIVE TOOL USE!
 // VOICE: GPT-SW3 6.7B - natural Swedish, chat, style pass
-const BRAIN_MODEL = 'gemma3:12b';
+const BRAIN_MODEL = 'ministral-3:14b';
 const VOICE_MODEL = 'fcole90/ai-sweden-gpt-sw3:6.7b';
 const DEFAULT_MODEL = BRAIN_MODEL;  // Legacy alias
 
@@ -797,7 +806,7 @@ export async function generateResponse(
       required: ['answer'],
     };
 
-    const response = await fetch(`${LLM_URL}/api/chat`, {
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -835,7 +844,7 @@ export async function generateResponse(
     // 🔍 DIAGNOSTIK: Logga RAW JSON för att detektera problem
     // Aktivera genom att sätta DEBUG_RAW_RESPONSE=true i environment
     if (process.env.DEBUG_RAW_RESPONSE === 'true') {
-      console.log('🔍 RAW GEMMA RESPONSE:', JSON.stringify({
+      console.log('🔍 RAW MINISTRAL RESPONSE:', JSON.stringify({
         content: message.content,
         raw_api_content: content,
         finish_reason: finishReason,
@@ -870,7 +879,7 @@ export async function generateResponse(
 
     // Content-empty recovery: run finalizer (no reasoning_content parsing)
     if (!answer) {
-      console.warn('⚠️ Gemma: content empty, running finalizer');
+      console.warn('⚠️ Ministral: content empty, running finalizer');
       answer = await runFinalizer(prompt);
     }
 
@@ -911,7 +920,7 @@ async function runFinalizer(originalPrompt: string): Promise<string> {
       required: ['answer'],
     };
 
-    const response = await fetch(`${LLM_URL}/api/chat`, {
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1018,7 +1027,7 @@ async function generateChatResponse(
   };
 
   try {
-    const response = await fetch(`${LLM_URL}/api/chat`, {
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1288,7 +1297,7 @@ ${context}
         answer: finalAnswer + sourcesSection,
         sources,
         reasoning_steps: reasoningSteps,
-        model_used: 'gemma3:12b (two-pass)',
+        model_used: 'ministral-3:14b (two-pass)',
         total_time_ms: Date.now() - startTime,
         warden_version: 'v2',
         warden_status: 'CITATIONS_STRIPPED', // Inte FACT_VERIFIED
@@ -1299,9 +1308,9 @@ ${context}
       };
     }
 
-    // Step 3: Generate answer with Gemma via Ollama
+    // Step 3: Generate answer with Ministral via Ollama
     // Natural conversational format (removed stiff "EVIDENS: ... SVAR: ..." structure)
-    reasoningSteps.push('Genererar svar med Gemma...');
+    reasoningSteps.push('Genererar svar med Ministral...');
 
     const userPrompt = `Besvara frågan baserat på följande dokument.
 
@@ -1455,7 +1464,7 @@ ${context}
       answer: finalAnswer || 'Kunde inte generera svar.',
       sources,
       reasoning_steps: reasoningSteps,
-      model_used: pass2WasTriggered ? 'gemma3:12b (two-pass)' : 'gemma3:12b (ollama)',
+      model_used: pass2WasTriggered ? 'ministral-3:14b (two-pass)' : 'ministral-3:14b (ollama)',
       total_time_ms: Date.now() - startTime,
 
       // Jail Warden v2 fields
@@ -1499,7 +1508,7 @@ export async function* streamChat(
 ): AsyncGenerator<string> {
   try {
     // Use Ollama streaming via /v1/chat/completions with stream: true
-    const response = await fetch(`${LLM_URL}/v1/chat/completions`, {
+    const response = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

@@ -7,15 +7,15 @@ Agentic RAG system för svenska myndighetsdokument.
 ```
 User → Frontend (3001) → Backend API (8000) → ChromaDB
                        ↘ Ollama (11434) ↗
-                         ├─ gemma3:12b (BRAIN)
-                         └─ gpt-sw3:6.7b (VOICE)
+                         ├─ ministral-3:14b (BRAIN)
+                         └─ fcole90/ai-sweden-gpt-sw3:6.7b (VOICE)
 ```
 
 ## Två-modell System
 
 | Modell | Roll | Används för |
 |--------|------|-------------|
-| **Gemma 3 12B** | BRAIN | Faktasvar, RAG, juridisk analys |
+| **Ministral 3 14B** | BRAIN | Faktasvar, RAG, juridisk analys, native tool use |
 | **GPT-SW3 6.7B** | VOICE | Chat, style pass, naturlig svenska |
 
 ## Response Modes
@@ -32,7 +32,7 @@ User → Frontend (3001) → Backend API (8000) → ChromaDB
 |---------|------|-------------|
 | constitutional-gpt | 3001 | Next.js frontend |
 | simons-ai-backend | 8000 | FastAPI + ChromaDB access |
-| Ollama | 11434 | LLM inference (Gemma + GPT-SW3) |
+| Ollama | 11434 | LLM inference (Ministral + GPT-SW3) |
 
 ## Starta/Stoppa
 
@@ -74,13 +74,13 @@ Frontend har HMR aktiverat - bara redigera filer:
 
 3. **ASSIST (Tvåpass)**
    - ChromaDB semantic search
-   - Pass A: Gemma genererar sakligt draft
+   - Pass A: Ministral genererar sakligt draft
    - Pass B: GPT-SW3 applicerar naturlig svenska
    - Källor bakom toggle
 
-4. **EVIDENCE (Gemma)**
+4. **EVIDENCE (Ministral)**
    - ChromaDB semantic search
-   - Gemma genererar tekniskt svar
+   - Ministral genererar tekniskt svar
    - Källor alltid synliga
 
 5. **Verifiering**

@@ -60,7 +60,7 @@
                          │
                          ▼
             ┌──────────────────────────┐
-            │   GPT-OSS (llama-server) │
+            │   Ministral 3 14B (Ollama) │
             │                          │
             │   Input:                 │
             │   • System: Base +       │
