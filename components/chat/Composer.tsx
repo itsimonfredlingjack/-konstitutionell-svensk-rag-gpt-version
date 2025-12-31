@@ -14,10 +14,24 @@ export function Composer({ onSend }: { onSend: (message: string) => void }) {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
+
   return (
-    <Panel className="sticky bottom-0 p-4 flex gap-2">
-      <Textarea ref={inputRef} placeholder="Ask about Swedish law..." />
-      <Button onClick={handleSubmit}>Send</Button>
-    </Panel>
+    <div className="sticky bottom-0 p-4 bg-surface-primary/95 backdrop-blur-sm border-t border-border-default z-10">
+      <div className="max-w-[var(--chatW)] mx-auto flex gap-2">
+        <Textarea
+          ref={inputRef}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask about Swedish law..."
+          className="bg-surface-elevated/50 focus:bg-surface-elevated border-border-default transition-colors resize-none min-h-[50px] max-h-[200px]"
+        />
+        <Button onClick={handleSubmit} className="h-auto">Send</Button>
+      </div>
+    </div>
   );
 }
