@@ -27,32 +27,49 @@ export type ToneStyle = 'conversational' | 'formal' | 'friendly';
  * 4. BEHÅLL ALLA LAGRUM OCH SFS-NUMMER EXAKT
  */
 const STYLE_PROMPTS: Record<ToneStyle, string> = {
-  conversational: `Skriv om detta svar så det låter naturligt.
+  conversational: `Du är en omskrivare. Gör juridiskt språk mer vardagligt.
 
-OBRYTBARA REGLER:
-• ÄNDRA ALDRIG INNEBÖRD - samma fakta, bara annorlunda formulerat
-• LÄGG ALDRIG TILL NY INFORMATION - inget nytt, ingen utfyllnad
-• Behåll ALLA SFS-nummer, paragrafnummer, lagreferenser EXAKT
-• Ta bort: "i enlighet med", "det framgår att", "det konstateras att"
-• Max samma längd som originalet (gärna kortare)
+FÖRBJUDET (bryter du mot detta är svaret oanvändbart):
+❌ Lägga till nya fakta, siffror eller påståenden
+❌ Ta bort eller ändra SFS-nummer, årtal, paragrafnummer
+❌ Ändra vad svaret säger - bara HUR det säger det
+❌ Göra svaret längre än originalet
+❌ Lägga till hälsningsfraser, "Hoppas det hjälper", etc.
 
-DIN ENDA UPPGIFT: Gör stelt juridikspråk mer vardagligt.`,
+TILLÅTET:
+✅ Byta "i enlighet med" → "enligt"
+✅ Byta "det framgår att" → ta bort helt
+✅ Byta "beaktat ovanstående" → ta bort helt
+✅ Förkorta långa meningar till kortare
+✅ Göra svaret KORTARE
 
-  formal: `Förtydliga detta svar med formell ton.
+EXEMPEL:
+Original: "I enlighet med 2 kap. 1 § regeringsformen framgår det att all offentlig makt utgår från folket."
+Omskrivet: "Enligt 2 kap. 1 § regeringsformen utgår all offentlig makt från folket."
 
-OBRYTBARA REGLER:
-• ÄNDRA ALDRIG INNEBÖRD
-• LÄGG ALDRIG TILL NY INFORMATION
-• Behåll ALLA referenser exakt
-• Använd myndighetsspråk`,
+Original: "Det konstateras att offentlighetsprincipen, såsom den stadgas i tryckfrihetsförordningen, ger medborgare rätt att ta del av allmänna handlingar."
+Omskrivet: "Offentlighetsprincipen i tryckfrihetsförordningen ger dig rätt att ta del av allmänna handlingar."
 
-  friendly: `Skriv om detta svar i en vänlig ton.
+Svara ENDAST med den omskrivna texten. Ingen inledning, ingen avslutning.`,
 
-OBRYTBARA REGLER:
-• ÄNDRA ALDRIG INNEBÖRD
-• LÄGG ALDRIG TILL NY INFORMATION
-• Behåll ALLA SFS-nummer och lagreferenser exakt
-• Max samma längd som originalet`,
+  formal: `Förtydliga svaret med formell myndighetston.
+
+FÖRBJUDET:
+❌ Lägga till nya fakta
+❌ Ändra SFS-nummer eller lagreferenser
+❌ Göra svaret längre
+
+Svara ENDAST med den omskrivna texten.`,
+
+  friendly: `Gör svaret vänligare utan att ändra fakta.
+
+FÖRBJUDET:
+❌ Lägga till nya fakta eller påståenden
+❌ Ändra SFS-nummer, årtal, paragrafnummer
+❌ Göra svaret längre än originalet
+❌ Lägga till "Hoppas det hjälper!" eller liknande
+
+Svara ENDAST med den omskrivna texten.`,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -112,8 +129,10 @@ OMSKRIVET:`
           required: ['rewritten'],
         },
         options: {
-          temperature: 0.7,
-          num_predict: 400,
+          temperature: 0.45,  // Låg temp = troget original, minimal drift
+          num_predict: 350,   // Kortare = tvingar förkortning
+          top_p: 0.9,
+          repeat_penalty: 1.1,
         },
       }),
     });

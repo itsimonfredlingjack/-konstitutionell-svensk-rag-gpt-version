@@ -309,7 +309,7 @@ export interface PipelineStep {
 export function usePipelineStatus() {
   const [steps, setSteps] = useState<PipelineStep[]>([
     { id: 'search', name: 'ChromaDB', role: 'Sökning', status: 'idle' },
-    { id: 'gemma', name: 'Gemma 3 12B', role: 'Svar (Ollama)', status: 'idle' },
+    { id: 'ministral', name: 'Ministral 3 14B', role: 'Svar (Ollama)', status: 'idle' },
     { id: 'warden', name: 'Jail Warden v2', role: 'Verifiering', status: 'idle' },
   ]);
 

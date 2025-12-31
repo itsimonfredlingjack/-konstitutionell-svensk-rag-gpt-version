@@ -3,14 +3,14 @@
  * ReAct-style agent that reasons about retrieval strategy
  *
  * MODELS:
- * - gemma3:12b (BRAIN): Tool planning and reasoning
+ * - ministral-3:14b (BRAIN): Tool planning, reasoning + NATIVE FUNCTION CALLING!
  * - Ollama on port 11434
  */
 
 import { TOOLS, getTool, formatToolsForPrompt, ToolResult } from './tools';
 import { LLM_URL } from '../config';
 
-const BRAIN_MODEL = 'gemma3:12b';
+const BRAIN_MODEL = 'ministral-3:14b';
 
 export interface AgentState {
   question: string;

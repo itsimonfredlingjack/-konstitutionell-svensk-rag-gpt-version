@@ -9,7 +9,7 @@
 
 import { LLM_URL } from '../config';
 
-const MEMORY_MODEL = 'gemma3:12b';
+const MEMORY_MODEL = 'ministral-3:14b';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES

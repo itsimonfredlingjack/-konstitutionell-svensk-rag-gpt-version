@@ -1,14 +1,41 @@
 /**
  * Agentic RAG System
  * Intelligent retrieval agent that dynamically decides search strategy
+ *
+ * NOW WITH NATIVE FUNCTION CALLING (Ministral 3 14B)
  */
 
-import { runAgent, formatAgentLog, type AgentState } from './agent';
+import { runAgent as runLegacyAgent, formatAgentLog as formatLegacyLog, type AgentState } from './agent';
+import { runNativeAgent, formatNativeAgentLog, type NativeAgentState } from './native-agent';
 import { TOOLS } from './tools';
 import { QueryAnalysis } from '../query-intelligence';
 
-export { runAgent, formatAgentLog };
-export type { AgentState };
+// Use native agent by default (Ministral 3 14B with function calling)
+const USE_NATIVE_AGENT = process.env.USE_NATIVE_AGENT !== 'false';
+
+/**
+ * Run the appropriate agent based on configuration
+ */
+export async function runAgent(question: string): Promise<AgentState | NativeAgentState> {
+  if (USE_NATIVE_AGENT) {
+    return runNativeAgent(question);
+  }
+  return runLegacyAgent(question);
+}
+
+/**
+ * Format agent log based on agent type
+ */
+export function formatAgentLog(state: AgentState | NativeAgentState): string {
+  if ('toolCalls' in state) {
+    return formatNativeAgentLog(state as NativeAgentState);
+  }
+  return formatLegacyLog(state as AgentState);
+}
+
+// Re-exports
+export { runNativeAgent, formatNativeAgentLog };
+export type { AgentState, NativeAgentState };
 export { TOOLS };
 
 /**
@@ -47,10 +74,10 @@ export async function runAgenticRetrieval(
   analysis: QueryAnalysis
 ): Promise<{
   documents: any[];
-  agentState: AgentState;
+  agentState: AgentState | NativeAgentState;
   reasoning: string;
 }> {
-  console.log('🤖 Starting Agentic RAG for:', question);
+  console.log(`🤖 Starting ${USE_NATIVE_AGENT ? 'Native' : 'Legacy'} Agentic RAG for:`, question);
 
   const agentState = await runAgent(question);
 
@@ -69,15 +96,32 @@ export async function runAgenticRetrieval(
 /**
  * Build human-readable reasoning summary
  */
-function buildReasoningSummary(state: AgentState): string {
-  if (state.actions.length === 0) {
+function buildReasoningSummary(state: AgentState | NativeAgentState): string {
+  // Handle native agent state
+  if ('toolCalls' in state) {
+    const nativeState = state as NativeAgentState;
+    if (nativeState.toolCalls.length === 0) {
+      return 'Ingen sökning utförd.';
+    }
+
+    const toolSummary = nativeState.toolCalls.map((call, i) => {
+      const obs = nativeState.observations[i];
+      return `${i + 1}. ${call.name}: ${obs?.summary || 'utförd'}`;
+    });
+
+    return `Native Agent (Ministral 3 14B):\n${toolSummary.join('\n')}`;
+  }
+
+  // Legacy agent state
+  const legacyState = state as AgentState;
+  if (legacyState.actions.length === 0) {
     return 'Ingen sökning utförd.';
   }
 
-  const steps = state.thoughts.filter(t => t.length > 0);
+  const steps = legacyState.thoughts.filter(t => t.length > 0);
 
   if (steps.length === 0) {
-    return `Utförde ${state.actions.length} sökningar och hittade ${state.collectedDocuments.length} dokument.`;
+    return `Utförde ${legacyState.actions.length} sökningar och hittade ${legacyState.collectedDocuments.length} dokument.`;
   }
 
   return `Agentens resonemang:\n${steps.map((t, i) => `${i + 1}. ${t}`).join('\n')}`;
@@ -123,21 +167,44 @@ export function mergeWithAnalysis(
 /**
  * Format agent context for the final LLM prompt
  */
-export function formatAgentContextForPrompt(state: AgentState): string {
-  if (state.actions.length === 0) {
+export function formatAgentContextForPrompt(state: AgentState | NativeAgentState): string {
+  // Handle native agent state
+  if ('toolCalls' in state) {
+    const nativeState = state as NativeAgentState;
+    if (nativeState.toolCalls.length === 0) {
+      return '';
+    }
+
+    const searchSummary = nativeState.toolCalls.map((call, i) => {
+      const obs = nativeState.observations[i];
+      return `- ${call.name}: ${obs?.summary || 'utförd'}`;
+    }).join('\n');
+
+    return `
+## AGENT-SÖKNING (Ministral 3 14B)
+Agenten utförde ${nativeState.totalSteps} steg för att besvara din fråga:
+${searchSummary}
+
+Totalt ${nativeState.collectedDocuments.length} relevanta dokument hittades.
+`;
+  }
+
+  // Legacy agent state
+  const legacyState = state as AgentState;
+  if (legacyState.actions.length === 0) {
     return '';
   }
 
-  const searchSummary = state.actions.map((action, i) => {
-    const obs = state.observations[i];
+  const searchSummary = legacyState.actions.map((action, i) => {
+    const obs = legacyState.observations[i];
     return `- ${action.tool}: ${obs?.summary || 'utförd'}`;
   }).join('\n');
 
   return `
 ## AGENT-SÖKNING
-Agenten utförde ${state.totalSteps} steg för att besvara din fråga:
+Agenten utförde ${legacyState.totalSteps} steg för att besvara din fråga:
 ${searchSummary}
 
-Totalt ${state.collectedDocuments.length} relevanta dokument hittades.
+Totalt ${legacyState.collectedDocuments.length} relevanta dokument hittades.
 `;
 }

@@ -8,6 +8,9 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 export const metadata: Metadata = {
     title: 'Constitutional Core | Neural Interface v2.4',
     description: 'Avancerad Constitutional AI - Högprecisions RAG-gränssnitt',
+    icons: {
+        icon: '/favicon.svg',
+    },
 }
 
 export default function RootLayout({

@@ -96,7 +96,7 @@ export const SystemMonitor = () => {
                         <div className="space-y-3">
                             <div>
                                 <div className="flex justify-between text-[9px] font-mono text-white/40 mb-1">
-                                    <span>Gemma 3 12B (BRAIN)</span>
+                                    <span>Ministral 3 14B (BRAIN)</span>
                                     <span className="text-purple-300">Active</span>
                                 </div>
                                 <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">

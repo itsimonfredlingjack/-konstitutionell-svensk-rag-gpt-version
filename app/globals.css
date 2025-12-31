@@ -15,14 +15,14 @@
     --font-mono: var(--font-roboto-mono), monospace;
 }
 
-:root {
+ :root {
     /* Pro Typography & Layout Variables */
     --chatW: clamp(1100px, 85vw, 1800px);
     --measure: 72ch;
 
     --foreground-rgb: 255, 255, 255;
-    --background-start-rgb: 15, 15, 30;
-    --background-end-rgb: 5, 5, 10;
+    --background-start-rgb: 20, 20, 40;
+    --background-end-rgb: 10, 10, 21;
 }
 
 body {

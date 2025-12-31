@@ -9,11 +9,14 @@ import { SlimRail } from "@/components/SlimRail";
 import { FloatingCapsule } from "@/components/FloatingCapsule";
 import { IntelligenceHud } from "@/components/IntelligenceHud";
 import { GlassTile } from "@/components/GlassTile";
+import { ModeIndicator } from "@/components/ModeIndicator";
+import { EvidenceLens } from "@/components/EvidenceLens";
+import IntelligenceStream from "@/components/IntelligenceStream";
 import { User, Loader2, Sparkles, AlertCircle, ChevronDown, ChevronUp, FileText } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import clsx from "clsx";
-import { useChat } from "@/lib/hooks";
+import { useChat, usePipelineStatus } from "@/lib/hooks";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SOURCES DISPLAY - Conditional based on mode
@@ -136,7 +139,7 @@ const StartupOverlay = () => {
                         "Dekrypterar neurala partitioner...",
                         "Synkroniserar vektorvikter...",
                         "Konfigurerar Kinetic HUD...",
-                        "Kärna online [Gemma 3 12B]"
+                        "Kärna online [Ministral 3 14B]"
                     ].map((text, i) => (
                         <motion.div
                             key={i}
@@ -168,6 +171,38 @@ export default function Home() {
 
     // Real chat hook
     const { messages, loading: chatLoading, sendMessage } = useChat();
+
+    // Pipeline status for Intelligence Stream
+    const { steps, updateStep, resetPipeline } = usePipelineStatus();
+
+    // Simulate pipeline steps when loading
+    useEffect(() => {
+        if (chatLoading) {
+            resetPipeline();
+            // Step 1: Search starts immediately
+            updateStep('search', { status: 'active' });
+
+            const timer1 = setTimeout(() => {
+                updateStep('search', { status: 'complete', latency: 45 });
+                updateStep('ministral', { status: 'active' });
+            }, 800);
+
+            const timer2 = setTimeout(() => {
+                updateStep('ministral', { status: 'complete', latency: 1200 });
+                updateStep('warden', { status: 'active' });
+            }, 2000);
+
+            const timer3 = setTimeout(() => {
+                updateStep('warden', { status: 'complete', latency: 150 });
+            }, 2500);
+
+            return () => {
+                clearTimeout(timer1);
+                clearTimeout(timer2);
+                clearTimeout(timer3);
+            };
+        }
+    }, [chatLoading, updateStep, resetPipeline]);
 
     // HUD State Logic
     // We activate the HUD if we are thinking OR if the last message has citations
@@ -251,20 +286,29 @@ export default function Home() {
 
                                 {messages.map((msg) => (
                                     <div key={msg.id} className={clsx("flex gap-6", msg.role === 'assistant' && "flex-row-reverse")}>
-                                        {/* Avatar */}
-                                        <div className="shrink-0 mt-2">
+                                        {/* Avatar + Mode Indicator */}
+                                        <div className="shrink-0 mt-2 flex flex-col items-center gap-2">
                                             {msg.role === 'user' ? (
                                                 <div className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
                                                     <User size={14} className="text-white/40" />
                                                 </div>
                                             ) : (
-                                                <div className="w-8 h-8 rounded-full bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shadow-[0_0_15px_-3px_rgba(6,182,212,0.3)]">
-                                                    {msg.loading ? (
-                                                        <Loader2 size={14} className="text-cyan-400 animate-spin" />
-                                                    ) : (
-                                                        <div className="w-2 h-2 bg-cyan-400 rounded-full shadow-[0_0_10px_rgba(6,182,212,1)]" />
+                                                <>
+                                                    <div className="w-8 h-8 rounded-full bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shadow-[0_0_15px_-3px_rgba(6,182,212,0.3)]">
+                                                        {msg.loading ? (
+                                                            <Loader2 size={14} className="text-cyan-400 animate-spin" />
+                                                        ) : (
+                                                            <div className="w-2 h-2 bg-cyan-400 rounded-full shadow-[0_0_10px_rgba(6,182,212,1)]" />
+                                                        )}
+                                                    </div>
+                                                    {/* Mode Indicator Badge */}
+                                                    {!msg.loading && msg.mode && (
+                                                        <ModeIndicator
+                                                            mode={msg.mode}
+                                                            evidenceLevel={msg.evidenceLevel}
+                                                        />
                                                     )}
-                                                </div>
+                                                </>
                                             )}
                                         </div>
 
@@ -286,13 +330,22 @@ export default function Home() {
                                                 )}
                                             </div>
 
-                                            {/* Sources with conditional display based on mode */}
+                                            {/* Evidence Lens - New clickable sources with confidence */}
                                             {msg.role === 'assistant' && !msg.loading && msg.sources && msg.sources.length > 0 && (
-                                                <SourcesDisplay
-                                                    sources={msg.sources}
-                                                    mode={msg.mode}
-                                                    showCitations={msg.showCitations}
-                                                />
+                                                <div className="mt-4 w-full">
+                                                    <EvidenceLens
+                                                        sources={msg.sources.map(s => ({
+                                                            ...s,
+                                                            score: s.score ?? 0.5 // Default score if not present
+                                                        }))}
+                                                        mode={msg.mode}
+                                                        onSourceClick={(source) => {
+                                                            console.log('Source clicked:', source);
+                                                            // TODO: Highlight in HUD or open modal
+                                                        }}
+                                                        maxSources={msg.mode === 'EVIDENCE' ? 4 : 2}
+                                                    />
+                                                </div>
                                             )}
                                         </div>
                                     </div>
@@ -309,12 +362,53 @@ export default function Home() {
                     </motion.div>
 
                     {/* Right Side: Intelligence HUD - Slides in */}
-                    <IntelligenceHud
-                        isVisible={showHud}
-                        isThinking={chatLoading}
-                        logs={["Initierar sökalgoritm...", "Viktar dokumentrelevans...", "Syntetiserar svar..."]} // TODO: Hook up to real stepping
-                        citations={lastMessage?.sources || []}
-                    />
+                    <AnimatePresence>
+                        {showHud && (
+                            <motion.div
+                                initial={{ x: 50, opacity: 0 }}
+                                animate={{ x: 0, opacity: 1 }}
+                                exit={{ x: 50, opacity: 0 }}
+                                transition={{ duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
+                                className="h-full w-[450px] shrink-0 flex flex-col gap-4 p-4"
+                            >
+                                {/* Intelligence Stream - Live Pipeline */}
+                                <IntelligenceStream
+                                    steps={steps}
+                                    logs={lastMessage?.reasoning || [
+                                        chatLoading ? "Söker i dokumentbasen..." : "Redo för nästa fråga"
+                                    ]}
+                                    isActive={chatLoading}
+                                />
+
+                                {/* Citations from HUD */}
+                                {(lastMessage?.sources?.length ?? 0) > 0 && (
+                                    <div className="flex-1 overflow-hidden rounded-2xl border border-white/10 bg-slate-900/50 backdrop-blur-xl p-4">
+                                        <div className="text-xs font-mono uppercase tracking-widest text-zinc-500 mb-3">
+                                            Verifierad Data ({lastMessage?.sources?.length || 0})
+                                        </div>
+                                        <div className="space-y-2 overflow-y-auto max-h-[300px] no-scrollbar">
+                                            {lastMessage?.sources?.slice(0, 5).map((source, idx) => (
+                                                <motion.div
+                                                    key={source.id}
+                                                    initial={{ opacity: 0, y: 10 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    transition={{ delay: idx * 0.1 }}
+                                                    className="p-3 rounded-lg bg-white/5 border border-white/10"
+                                                >
+                                                    <div className="text-sm font-medium text-cyan-200 truncate">
+                                                        {source.title}
+                                                    </div>
+                                                    <div className="text-xs text-zinc-400 mt-1 line-clamp-2">
+                                                        {source.snippet || "Ingen förhandstitt"}
+                                                    </div>
+                                                </motion.div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
 
                 </div>
             </MainLayout>

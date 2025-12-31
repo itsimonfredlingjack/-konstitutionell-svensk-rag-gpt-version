@@ -5,7 +5,7 @@
  * UI renders `answer` as plain text. Citations are hidden behind toggle.
  *
  * MODELS:
- * - Gemma 3 12B: ASSIST/EVIDENCE (brain for facts)
+ * - Ministral 3 14B: ASSIST/EVIDENCE (brain for facts + NATIVE TOOL USE!)
  * - GPT-SW3 6.7B: CHAT and style pass (voice for natural Swedish)
  */
 
@@ -291,8 +291,8 @@ export function createCanonicalResponse(
  * GPT-SW3 6.7B: Voice for CHAT and style pass (natural Swedish)
  */
 export const MODEL_CONFIG = {
-  /** Brain model - factual answers and analysis */
-  BRAIN: 'gemma3:12b',
+  /** Brain model - factual answers, analysis, and NATIVE TOOL USE! */
+  BRAIN: 'ministral-3:14b',
 
   /** Voice model - natural Swedish conversation */
   VOICE: 'fcole90/ai-sweden-gpt-sw3:6.7b',

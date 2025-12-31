@@ -5,7 +5,7 @@
  * NO string parsing - schema is the source of truth.
  *
  * MODELS:
- * - gemma3:12b (BRAIN): Factual answers, analysis, RAG
+ * - ministral-3:14b (BRAIN): Factual answers, analysis, RAG + NATIVE TOOL USE
  * - fcole90/ai-sweden-gpt-sw3:6.7b (VOICE): Natural Swedish, chat, style pass
  */
 
@@ -52,7 +52,7 @@ interface OllamaRequestOptions {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // KEEP_ALIVE STRATEGY
-// RTX 4070 12GB can't hold both Gemma (~8.1GB) and GPT-SW3 (~5.2GB) in VRAM
+// RTX 4070 12GB can't hold both Ministral (~9.1GB) and GPT-SW3 (~5.2GB) in VRAM
 // Mode-based keep_alive prevents random latency spikes
 // ═══════════════════════════════════════════════════════════════════════════
 const KEEP_ALIVE = {
@@ -269,7 +269,7 @@ async function callOllamaOpenAI(options: OllamaRequestOptions): Promise<OllamaRe
  * FALLBACK CHAIN:
  * 1. GPT-SW3 with structured output
  * 2. GPT-SW3 without structured output
- * 3. BRAIN (Gemma) with chat-friendly prompt (emergency fallback)
+ * 3. BRAIN (Ministral) with chat-friendly prompt (emergency fallback)
  */
 export async function generateChatResponse(
   question: string,
@@ -351,7 +351,7 @@ export async function generateChatResponse(
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ATTEMPT 3: BRAIN (Gemma) with chat-friendly prompt
+  // ATTEMPT 3: BRAIN (Ministral) with chat-friendly prompt
   // Emergency fallback if GPT-SW3 is completely unavailable
   // NOTE: Question is ONLY in user message - never duplicate in system prompt
   // ─────────────────────────────────────────────────────────────────────────
@@ -403,11 +403,11 @@ REGLER:
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// HIGH-LEVEL API - TWO-PASS ASSIST (Gemma → GPT-SW3)
+// HIGH-LEVEL API - TWO-PASS ASSIST (Ministral → GPT-SW3)
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * PASS A: Generate factual draft answer with Gemma (Brain model)
+ * PASS A: Generate factual draft answer with Ministral (Brain model)
  * Low temperature, structured citations
  */
 export async function generateDraftAnswer(
@@ -415,7 +415,7 @@ export async function generateDraftAnswer(
   sources: Array<{ id: string; title: string; content: string; sfs?: string }>,
   systemPrompt: string
 ): Promise<DraftAnswer> {
-  console.log(`🧠 PASS A: Gemma generating draft answer with ${sources.length} sources...`);
+  console.log(`🧠 PASS A: Ministral generating draft answer with ${sources.length} sources...`);
 
   // Adaptive unload: switch to BRAIN mode
   await adaptiveUnload('BRAIN');
@@ -542,7 +542,7 @@ Skriv om svaret:`;
 
 /**
  * Complete two-pass ASSIST flow
- * Pass A: Gemma generates factual draft
+ * Pass A: Ministral generates factual draft
  * Pass B: GPT-SW3 applies natural Swedish style
  */
 export async function generateAssistResponse(
@@ -554,7 +554,7 @@ export async function generateAssistResponse(
   const startTime = Date.now();
   console.log(`🤖 ASSIST: Two-pass response with ${sources.length} sources...`);
 
-  // PASS A: Gemma generates draft
+  // PASS A: Ministral generates draft
   const draftStart = Date.now();
   const draft = await generateDraftAnswer(question, sources, systemPrompt);
   const draftLatency = Date.now() - draftStart;
@@ -588,11 +588,11 @@ export async function generateAssistResponse(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// HIGH-LEVEL API - EVIDENCE MODE (Gemma only, no style pass)
+// HIGH-LEVEL API - EVIDENCE MODE (Ministral only, no style pass)
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Generate EVIDENCE response - Gemma only, technical tone, always show citations
+ * Generate EVIDENCE response - Ministral only, technical tone, always show citations
  */
 export async function generateEvidenceResponse(
   question: string,
@@ -602,7 +602,7 @@ export async function generateEvidenceResponse(
   const startTime = Date.now();
   console.log(`📖 EVIDENCE: Single-pass response with ${sources.length} sources...`);
 
-  // Gemma only - no style pass for EVIDENCE mode
+  // Ministral only - no style pass for EVIDENCE mode
   const draft = await generateDraftAnswer(question, sources, systemPrompt);
 
   // Production logging

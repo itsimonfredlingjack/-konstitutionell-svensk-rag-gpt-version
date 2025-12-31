@@ -6,7 +6,7 @@ Direct RAG för svenska myndighetsdokument (535K docs i ChromaDB).
 
 | Modell | Alias | Roll | Backend |
 |--------|-------|------|---------|
-| **gemma3:12b** | BRAIN | Faktasvar, RAG, analys | Ollama (port 11434) |
+| **ministral-3:14b** | BRAIN | Faktasvar, RAG, analys + NATIVE TOOL USE | Ollama (port 11434) |
 | **fcole90/ai-sweden-gpt-sw3:6.7b** | VOICE | Chat, style pass, naturlig svenska | Ollama (port 11434) |
 
 ## Response Modes
@@ -14,20 +14,20 @@ Direct RAG för svenska myndighetsdokument (535K docs i ChromaDB).
 | Mode | Modell(er) | Retrieval | Källor |
 |------|-----------|-----------|--------|
 | **CHAT** | GPT-SW3 only | ❌ | Aldrig |
-| **ASSIST** | Gemma → GPT-SW3 | ✅ | Bakom toggle |
-| **EVIDENCE** | Gemma only | ✅ | Alltid synliga |
+| **ASSIST** | Ministral → GPT-SW3 | ✅ | Bakom toggle |
+| **EVIDENCE** | Ministral only | ✅ | Alltid synliga |
 
 ## Arkitektur
 
 ```
 CHAT:     Fråga → GPT-SW3 → Svar (ingen RAG)
-ASSIST:   Fråga → ChromaDB → Gemma (draft) → GPT-SW3 (style) → Svar
-EVIDENCE: Fråga → ChromaDB → Gemma → Svar med citat
+ASSIST:   Fråga → ChromaDB → Ministral (draft) → GPT-SW3 (style) → Svar
+EVIDENCE: Fråga → ChromaDB → Ministral → Svar med citat
 ```
 
 ## Tvåpass ASSIST Flow
 
-1. **Pass A (BRAIN)**: Gemma genererar sakligt draft med citat [1], [2]
+1. **Pass A (BRAIN)**: Ministral genererar sakligt draft med citat [1], [2]
    - Låg temperatur (0.1) för precision
    - Strukturerad JSON-output via `format`-parameter
 
@@ -41,7 +41,7 @@ Använder Ollamas `format`-parameter för garanterad JSON:
 
 ```typescript
 const response = await callOllama({
-  model: 'gemma3:12b',
+  model: 'ministral-3:14b',
   messages: [...],
   format: CANONICAL_RESPONSE_JSON_SCHEMA,  // Schema-bound output
 });
@@ -78,5 +78,5 @@ interface CanonicalResponse {
 ## VIKTIGT
 
 - Använd Ollama (port 11434), INTE llama-server
-- Gemma = BRAIN (faktasvar), GPT-SW3 = VOICE (naturlig svenska)
+- Ministral = BRAIN (faktasvar + tool use), GPT-SW3 = VOICE (naturlig svenska)
 - CHAT-mode använder ALDRIG dokument eller lagcitat

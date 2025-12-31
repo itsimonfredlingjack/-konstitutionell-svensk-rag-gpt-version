@@ -3,13 +3,18 @@
  *
  * TWO-PASS ARCHITECTURE:
  * - CHAT: GPT-SW3 only (no retrieval)
- * - ASSIST: Gemma (facts) → GPT-SW3 (style pass)
- * - EVIDENCE: Gemma only (technical tone, no style pass)
+ * - ASSIST: Ministral (facts) → GPT-SW3 (style pass)
+ * - EVIDENCE: Ministral only (technical tone, no style pass)
  *
  * MODELS:
- * - Gemma 3 12B (BRAIN): Factual answers, RAG, analysis
+ * - Ministral 3 14B (BRAIN): Factual answers, RAG, analysis + NATIVE TOOL USE
  * - GPT-SW3 6.7B (VOICE): Natural Swedish, chat, style pass
+ *
+ * NEW: For advanced agentic RAG, use runReactAgent from ./react-agent.ts
  */
+
+// Re-export the new ReAct agent as the recommended interface
+export { runReactAgent, type ReactAgentResponse } from './react-agent';
 
 import { TOOLS, getTool, type ToolResult } from './tools';
 import { logMetric } from '../api';

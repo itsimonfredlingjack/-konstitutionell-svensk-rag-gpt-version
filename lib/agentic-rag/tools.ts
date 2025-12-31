@@ -400,9 +400,9 @@ Ge ett koncist, välgrundat svar. Var specifik och citera källor om möjligt.`;
   // Fallback: Local parallel calls to Ollama with different temperatures
   try {
     const modelConfigs = [
-      { name: 'gemma3:12b', temp: 0.1, role: 'Strikt faktabaserad' },
-      { name: 'gemma3:12b', temp: 0.7, role: 'Balanserad analys' },
-      { name: 'gemma3:12b', temp: 0.9, role: 'Kreativ/explorativ' },
+      { name: 'ministral-3:14b', temp: 0.1, role: 'Strikt faktabaserad' },
+      { name: 'ministral-3:14b', temp: 0.7, role: 'Balanserad analys' },
+      { name: 'ministral-3:14b', temp: 0.9, role: 'Kreativ/explorativ' },
     ];
 
     console.log(`   → Kör ${modelConfigs.length} parallella anrop till Ollama...`);
