@@ -5,6 +5,7 @@
 
 import { analyzeQuery, getOptimalSearchQuery, type QueryAnalysis, type QueryType } from './query-intelligence';
 import { getChatProfile, type ChatProfile } from './orchestration/chat-profiles';
+import { BACKEND_URL, LLM_URL } from './config';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // JAIL WARDEN - Swedish Law Corrections Dictionary
@@ -572,17 +573,6 @@ export function logMetric(event: string, context?: Record<string, any>): void {
   console.warn(`📊 METRICS: ${JSON.stringify(metric)}`);
 }
 
-// Use current hostname to allow access from other devices on the network
-const getBaseUrl = (port: number) => {
-  if (typeof window !== 'undefined') {
-    return `http://${window.location.hostname}:${port}`;
-  }
-  return `http://localhost:${port}`;
-};
-
-const BACKEND_URL = getBaseUrl(8000);
-const OLLAMA_URL = getBaseUrl(11434);
-
 // NOTE: Constitutional-GPT uses Ollama with gemma3:12b
 // Previously used llama-server with GPT-OSS, now switched to Ollama
 
@@ -768,7 +758,7 @@ export async function getHealth(): Promise<{ status: string; uptime?: number } |
 
 export async function getLoadedModels(): Promise<string[]> {
   try {
-    const response = await fetch(`${OLLAMA_URL}/api/tags`);
+    const response = await fetch(`${LLM_URL}/api/tags`);
     if (response.ok) {
       const data = await response.json();
       return data.models?.map((m: { name: string }) => m.name) || [];
@@ -807,7 +797,7 @@ export async function generateResponse(
       required: ['answer'],
     };
 
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    const response = await fetch(`${LLM_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -921,7 +911,7 @@ async function runFinalizer(originalPrompt: string): Promise<string> {
       required: ['answer'],
     };
 
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    const response = await fetch(`${LLM_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1028,7 +1018,7 @@ async function generateChatResponse(
   };
 
   try {
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    const response = await fetch(`${LLM_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1509,7 +1499,7 @@ export async function* streamChat(
 ): AsyncGenerator<string> {
   try {
     // Use Ollama streaming via /v1/chat/completions with stream: true
-    const response = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
+    const response = await fetch(`${LLM_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

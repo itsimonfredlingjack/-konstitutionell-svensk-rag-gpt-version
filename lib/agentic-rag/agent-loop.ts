@@ -41,11 +41,11 @@ import {
   callWithTools,
 } from '../orchestration/ollama-client';
 import { getChatProfile } from '../orchestration/chat-profiles';
+import { LLM_URL } from '../config';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
-const OLLAMA_URL = 'http://localhost:11434';
 const MAX_ITERATIONS = 3;
 
 // Hallucination Jail Warden - verifies answers against ChromaDB
@@ -467,7 +467,8 @@ async function verifyWithJailWarden(question: string, answer: string): Promise<J
 
 async function extractClaims(answer: string): Promise<string[]> {
   try {
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    const response = await fetch(`${LLM_URL}/api/chat`, {
+    const response = await fetch(`${LLM_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -526,7 +527,7 @@ async function regenerateAnswer(question: string, hallucinations: string[], orig
   const hallucinationList = hallucinations.map(h => `• ${h}`).join('\n');
 
   try {
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    const response = await fetch(`${LLM_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
