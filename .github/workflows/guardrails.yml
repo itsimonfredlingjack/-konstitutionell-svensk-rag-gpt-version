@@ -1,6 +1,12 @@
 name: Guardrails - Forbidden Patterns Check
 on: [push, pull_request]
 
+# Constitutional AI Model Configuration (2024-12-31):
+# - BRAIN: ministral-3:14b (Ollama 11434) - facts, RAG, native tool use
+# - VOICE: fcole90/ai-sweden-gpt-sw3:6.7b (Ollama 11434) - chat, style pass
+#
+# GPT-OSS 20B is ONLY for OpenCode CLI, NOT Constitutional AI
+
 jobs:
   check-forbidden-patterns:
     runs-on: ubuntu-latest
@@ -10,23 +16,32 @@ jobs:
       - name: Block Hermes references
         run: |
           if grep -rE "hermes3|hermes-3|TOOL_MODEL.*hermes" lib/ --include="*.ts" --include="*.tsx"; then
-            echo "ERROR: Hermes references found in runtime code. Hermes is permanently removed."
+            echo "ERROR: Hermes references found. Ministral 3 14B handles tool calling natively."
             exit 1
           fi
           echo "OK: No Hermes references found"
 
-      - name: Block Ollama port 11434
+      - name: Block GPT-OSS in lib/ (OpenCode only)
         run: |
-          if grep -rE ":11434|OLLAMA_URL" lib/ --include="*.ts" --include="*.tsx" | grep -v ".backup"; then
-            echo "ERROR: Port 11434 (Ollama) found in runtime code."
+          if grep -riE "gpt-oss|gptoss" lib/ --include="*.ts" --include="*.tsx"; then
+            echo "ERROR: GPT-OSS found in lib/. GPT-OSS is for OpenCode only."
+            echo "Constitutional AI uses: ministral-3:14b (BRAIN) + GPT-SW3 (VOICE)"
             exit 1
           fi
-          echo "OK: No port 11434 references found"
+          echo "OK: No GPT-OSS references in lib/"
+
+      - name: Block llama-server references
+        run: |
+          if grep -rE "llama-server|:8080" lib/ --include="*.ts" --include="*.tsx"; then
+            echo "ERROR: llama-server found. Constitutional AI uses Ollama (port 11434)."
+            exit 1
+          fi
+          echo "OK: No llama-server references found"
 
       - name: Block legacy completions endpoint
         run: |
           if grep -rE '"/v1/completions"' lib/ --include="*.ts" --include="*.tsx"; then
-            echo "ERROR: /v1/completions endpoint found. Use /v1/chat/completions instead."
+            echo "ERROR: /v1/completions endpoint found. Use Ollama /api/chat instead."
             exit 1
           fi
           echo "OK: No /v1/completions references found"
@@ -56,3 +71,14 @@ jobs:
             fi
           fi
           echo "OK: No reasoning_content in UI components"
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "✅ All guardrails passed!"
+          echo ""
+          echo "📚 Constitutional AI Model Configuration:"
+          echo "   BRAIN: ministral-3:14b (Ollama 11434)"
+          echo "   VOICE: fcole90/ai-sweden-gpt-sw3:6.7b (Ollama 11434)"
+          echo ""
+          echo "   GPT-OSS 20B is ONLY for OpenCode CLI"
