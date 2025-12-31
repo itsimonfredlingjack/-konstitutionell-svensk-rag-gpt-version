@@ -27,7 +27,7 @@ const SWEDISH_LAW_CORRECTIONS: Record<string, string> = {
   'regeringslagen': 'Regeringsformen (RF)',
 };
 
-function applyJailWardenCorrections(text: string): { correctedText: string; corrections: string[] } {
+export function applyJailWardenCorrections(text: string): { correctedText: string; corrections: string[] } {
   const corrections: string[] = [];
   let correctedText = text;
 

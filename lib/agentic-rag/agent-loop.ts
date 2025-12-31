@@ -473,7 +473,6 @@ async function verifyWithJailWarden(question: string, answer: string): Promise<J
 async function extractClaims(answer: string): Promise<string[]> {
   try {
     const response = await fetch(`${LLM_URL}/api/chat`, {
-    const response = await fetch(`${LLM_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
