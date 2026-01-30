@@ -24,7 +24,7 @@ import {
   getRecommendedWeights,
   type HybridSearchResult,
 } from './hybrid-search';
-import { BACKEND_URL, LLM_URL } from '../config';
+import { BACKEND_URL, LLM_URL, SEARXNG_URL } from '../config';
 
 const N8N_WEBHOOK_URL = 'http://localhost:5678/webhook'; // Adjust as needed
 
@@ -299,7 +299,7 @@ async function webSearch(params: Record<string, any>): Promise<ToolResult> {
 
   // Fallback: Try SearXNG directly
   try {
-    const searxngUrl = `http://localhost:8080/search?q=${encodeURIComponent(query)}&format=json&language=sv`;
+    const searxngUrl = `${SEARXNG_URL}/search?q=${encodeURIComponent(query)}&format=json&language=sv`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
