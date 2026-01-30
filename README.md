@@ -52,6 +52,15 @@ systemctl --user restart constitutional-gpt
 journalctl --user -u constitutional-gpt -f
 ```
 
+## Projektstruktur
+
+- `app/`: Next.js application code
+- `components/`: React components
+- `lib/`: Shared libraries and core logic
+- `scripts/`: Utility scripts and tools
+- `tests/`: Test suites (Acceptance, Network, Regression)
+- `docs/`: Documentation and archive
+
 ## Utveckling
 
 Frontend har HMR aktiverat - bara redigera filer:
@@ -59,6 +68,11 @@ Frontend har HMR aktiverat - bara redigera filer:
 - API Client: `lib/api.ts`
 - Orchestration: `lib/orchestration/`
 - Agent Logic: `lib/agentic-rag/`
+
+### Köra tester
+- `npm run test:acceptance`
+- `npm run test:network`
+- `npm run test:conversation`
 
 ## Dataflöde
 

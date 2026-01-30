@@ -4,7 +4,7 @@
  * Run with: npx tsx test-react-agent.ts
  */
 
-import { runReactAgent } from './lib/agentic-rag/react-agent';
+import { runReactAgent } from '../lib/agentic-rag/react-agent';
 
 async function main() {
   console.log('🧪 Testing ReAct Agent with complex query...\n');
